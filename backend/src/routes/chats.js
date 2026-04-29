@@ -1,0 +1,225 @@
+const express = require('express');
+const router = express.Router();
+const pool = require('../config/db');
+const { sendMessage, getMessages } = require('../controllers/messageController');
+const { sendWhatsAppText } = require('../services/whatsapp');
+
+const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '');
+
+const buildDispatchMessage = ({ chat, lastClientMessage, lastLocationMessage, notes, driverName }) => {
+  const lines = [
+    'NUEVA CARRERA',
+    `Cliente: ${chat.contact_name || 'Sin nombre'}`,
+    `Telefono cliente: +${chat.phone_number}`
+  ];
+
+  if (lastLocationMessage) {
+    if (lastLocationMessage.location_name) {
+      lines.push(`Punto de recogida: ${lastLocationMessage.location_name}`);
+    }
+    if (lastLocationMessage.location_address) {
+      lines.push(`Direccion: ${lastLocationMessage.location_address}`);
+    }
+    if (lastLocationMessage.location_lat && lastLocationMessage.location_lng) {
+      lines.push(`Maps: https://maps.google.com/?q=${lastLocationMessage.location_lat},${lastLocationMessage.location_lng}`);
+    }
+  }
+
+  if (lastClientMessage?.content) {
+    lines.push(`Ultimo mensaje: ${lastClientMessage.content.replace(/\s+/g, ' ').trim().slice(0, 280)}`);
+  }
+
+  if (notes) {
+    lines.push(`Notas operador: ${notes.replace(/\s+/g, ' ').trim().slice(0, 280)}`);
+  }
+
+  lines.push('Responder con ACEPTO para confirmar la carrera.');
+
+  if (driverName) {
+    lines.unshift(`Taxi: ${driverName}`);
+  }
+
+  return lines.join('\n');
+};
+
+// Obtener todos los chats
+router.get('/', async (req, res) => {
+  const result = await pool.query(
+    `SELECT c.*,
+            (SELECT content FROM messages WHERE chat_id = c.id
+             AND message_type <> 'dispatch'
+             ORDER BY timestamp DESC LIMIT 1) as last_message
+     FROM chats c
+     ORDER BY c.updated_at DESC`
+  );
+  res.json(result.rows);
+});
+
+// Obtener mensajes de un chat
+router.get('/:chatId/messages', getMessages);
+
+// Enviar mensaje
+router.post('/send', sendMessage);
+
+// Despachar carrera a taxista por WhatsApp
+router.post('/:chatId/dispatch-driver', async (req, res) => {
+  const { chatId } = req.params;
+  const { driverId, driverPhone, driverName, vehicleLabel, notes, saveDriver } = req.body;
+  let normalizedDriverPhone = normalizePhone(driverPhone);
+  let selectedDriverName = String(driverName || '').trim();
+  let selectedVehicleLabel = String(vehicleLabel || '').trim();
+
+  try {
+    if (driverId) {
+      const driverResult = await pool.query(
+        `SELECT name, phone_number, vehicle_label
+         FROM driver_contacts
+         WHERE id = $1 AND active = true`,
+        [driverId]
+      );
+
+      if (driverResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Taxista no encontrado' });
+      }
+
+      const driver = driverResult.rows[0];
+      normalizedDriverPhone = driver.phone_number;
+      selectedDriverName = driver.name;
+      selectedVehicleLabel = driver.vehicle_label || '';
+    }
+
+    if (!normalizedDriverPhone) {
+      return res.status(400).json({ error: 'Número de taxista inválido' });
+    }
+
+    const chatResult = await pool.query(
+      `SELECT id, contact_name, phone_number
+       FROM chats
+       WHERE id = $1`,
+      [chatId]
+    );
+
+    if (chatResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Chat no encontrado' });
+    }
+
+    const chat = chatResult.rows[0];
+
+    const [lastClientMessageResult, lastLocationMessageResult] = await Promise.all([
+      pool.query(
+        `SELECT content, timestamp
+         FROM messages
+         WHERE chat_id = $1 AND from_agent = false
+         ORDER BY timestamp DESC
+         LIMIT 1`,
+        [chatId]
+      ),
+      pool.query(
+        `SELECT location_lat, location_lng, location_name, location_address
+         FROM messages
+         WHERE chat_id = $1 AND from_agent = false
+           AND (message_type = 'location' OR location_lat IS NOT NULL)
+         ORDER BY timestamp DESC
+         LIMIT 1`,
+        [chatId]
+      )
+    ]);
+
+    const dispatchText = buildDispatchMessage({
+      chat,
+      lastClientMessage: lastClientMessageResult.rows[0],
+      lastLocationMessage: lastLocationMessageResult.rows[0],
+      notes,
+      driverName: selectedDriverName
+    });
+
+    await sendWhatsAppText(normalizedDriverPhone, dispatchText);
+
+    if (saveDriver && !driverId) {
+      await pool.query(
+        `INSERT INTO driver_contacts (name, phone_number, vehicle_label, active)
+         VALUES ($1, $2, $3, true)
+         ON CONFLICT (phone_number) DO UPDATE SET
+           name = COALESCE(NULLIF(EXCLUDED.name, ''), driver_contacts.name),
+           vehicle_label = COALESCE(NULLIF(EXCLUDED.vehicle_label, ''), driver_contacts.vehicle_label),
+           active = true,
+           updated_at = NOW()`,
+        [
+          selectedDriverName || normalizedDriverPhone,
+          normalizedDriverPhone,
+          selectedVehicleLabel
+        ]
+      );
+    }
+
+    await pool.query(
+      `UPDATE chats
+       SET status = 'active',
+           assigned_driver_phone = $1,
+           assigned_driver_name = NULLIF($2, ''),
+           assigned_driver_vehicle_label = NULLIF($3, ''),
+           driver_dispatched_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $4`,
+      [normalizedDriverPhone, selectedDriverName, selectedVehicleLabel, chatId]
+    );
+
+    const driverLabel = selectedDriverName || `+${normalizedDriverPhone}`;
+    const vehicleText = selectedVehicleLabel ? ` · ${selectedVehicleLabel}` : '';
+    const dispatchLog = `Carrera enviada al taxista: ${driverLabel} (+${normalizedDriverPhone})${vehicleText}`;
+    await pool.query(
+      `INSERT INTO messages (chat_id, content, from_agent, message_type)
+       VALUES ($1, $2, true, 'dispatch')`,
+      [chatId, dispatchLog]
+    );
+
+    const { io } = require('../../index');
+    io.emit('message_sent', { chatId, text: dispatchLog, fromAgent: true });
+
+    res.status(201).json({
+      success: true,
+      driver_phone: normalizedDriverPhone,
+      driver_name: selectedDriverName || null,
+      driver_vehicle_label: selectedVehicleLabel || null,
+      driver_dispatched_at: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Error despachando taxista:', error.message);
+    res.status(500).json({ error: 'No se pudo despachar la carrera al taxista' });
+  }
+});
+
+if (process.env.ENABLE_SIMULATOR === 'true' || process.env.NODE_ENV !== 'production') {
+  // SOLO PARA PRUEBAS — desactivado por defecto en producción.
+  router.post('/simulate', async (req, res) => {
+    const { phone, name, text } = req.body;
+    const messageQueue = require('../queues/messageQueue');
+
+    await messageQueue.add({
+      from: phone,
+      text: text,
+      waMessageId: 'sim_' + Date.now(),
+      contactName: name,
+      timestamp: Date.now()
+    });
+
+    res.json({ success: true, message: 'Mensaje simulado enviado' });
+  });
+}
+
+// Activar/desactivar bot manualmente
+router.post('/:chatId/bot', async (req, res) => {
+  const { chatId } = req.params;
+  const { active } = req.body;
+  const { reactivateBot, deactivateBot } = require('../bot/chatbot');
+
+  if (active) {
+    await reactivateBot(chatId);
+  } else {
+    await deactivateBot(chatId);
+  }
+
+  res.json({ success: true, bot_active: active });
+});
+
+module.exports = router;
