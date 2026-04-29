@@ -1,24 +1,11 @@
-const Queue = require('bull');
+const axios = require('axios');
 require('dotenv').config();
-const { sendWhatsAppText } = require('../services/whatsapp');
-const { cleanEnv } = require('../config/env');
 
-const redisUrl = cleanEnv(process.env.REDIS_URL);
-const redisConfig = redisUrl || {
-  redis: {
-    host: cleanEnv(process.env.REDIS_HOST),
-    port: cleanEnv(process.env.REDIS_PORT)
-  }
-};
-
-const messageQueue = new Queue('whatsapp-messages', redisConfig);
-
-messageQueue.process(async (job) => {
-  const { from, text, waMessageId, contactName } = job.data;
+const processJob = async (data) => {
+  const { from, text, waMessageId, contactName, locationData, messageType } = data;
   const pool = require('../config/db');
   const { processMessage } = require('../bot/chatbot');
 
-  // Buscar o crear chat
   let chatResult = await pool.query(
     'SELECT id FROM chats WHERE phone_number = $1', [from]
   );
@@ -32,69 +19,71 @@ messageQueue.process(async (job) => {
       [from, contactName]
     );
     chatId = newChat.rows[0].id;
-    console.log(`🆕 Nuevo chat: ${from}`);
   } else {
     chatId = chatResult.rows[0].id;
-    await pool.query(
-      `UPDATE chats
-       SET contact_name = COALESCE(NULLIF($1, ''), contact_name),
-           updated_at = NOW()
-       WHERE id = $2`,
-      [contactName, chatId]
-    );
   }
 
-  // Guardar mensaje del cliente. Si Meta reintenta el webhook, no duplicamos.
-  const insertedMessage = await pool.query(
+  await pool.query(
     `INSERT INTO messages (chat_id, content, from_agent, wa_message_id, message_type,
       location_lat, location_lng, location_name, location_address)
-     VALUES ($1, $2, false, $3, $4, $5, $6, $7, $8)
-     ON CONFLICT (wa_message_id) DO NOTHING
-     RETURNING id`,
+     VALUES ($1, $2, false, $3, $4, $5, $6, $7, $8)`,
     [
-      chatId,
-      text,
-      waMessageId,
-      job.data.messageType || 'text',
-      job.data.locationData?.latitude || null,
-      job.data.locationData?.longitude || null,
-      job.data.locationData?.name || null,
-      job.data.locationData?.address || null,
+      chatId, text, waMessageId,
+      messageType || 'text',
+      locationData?.latitude || null,
+      locationData?.longitude || null,
+      locationData?.name || null,
+      locationData?.address || null,
     ]
   );
 
-  if (insertedMessage.rows.length === 0) {
-    return;
-  }
-
-  await pool.query('UPDATE chats SET updated_at = NOW() WHERE id = $1', [chatId]);
-
-  // Procesar con el bot
   const botResponse = await processMessage(chatId, text);
 
   if (botResponse) {
-    // Guardar respuesta del bot en BD
     await pool.query(
-      `INSERT INTO messages (chat_id, content, from_agent)
-       VALUES ($1, $2, true)`,
+      'INSERT INTO messages (chat_id, content, from_agent) VALUES ($1, $2, true)',
       [chatId, botResponse]
     );
-    await pool.query('UPDATE chats SET updated_at = NOW() WHERE id = $1', [chatId]);
 
-    await sendWhatsAppText(from, botResponse);
+    if (process.env.WA_ACCESS_TOKEN !== 'pending') {
+      try {
+        await axios.post(
+          `https://graph.facebook.com/v18.0/${process.env.WA_PHONE_ID}/messages`,
+          {
+            messaging_product: 'whatsapp',
+            to: from,
+            type: 'text',
+            text: { body: botResponse }
+          },
+          {
+            headers: { Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` }
+          }
+        );
+      } catch (err) {
+        console.log('📤 [SIMULADO] Bot responde:', botResponse);
+      }
+    } else {
+      console.log('📤 [SIMULADO] Bot responde:', botResponse);
+    }
   }
 
-  // Notificar al panel en tiempo real
-  const { io } = require('../../index');
+  const { io } = require('../index');
   io.emit('new_message', {
     chatId, from, contactName, text,
     timestamp: new Date(),
     botResponse
   });
-});
+};
 
-messageQueue.on('failed', (job, err) => {
-  console.error('❌ Error en cola:', err.message);
-});
+// API compatible con Bull para no cambiar nada más
+const messageQueue = {
+  add: async (data) => {
+    try {
+      await processJob(data);
+    } catch (err) {
+      console.error('❌ Error procesando mensaje:', err.message);
+    }
+  }
+};
 
 module.exports = messageQueue;
