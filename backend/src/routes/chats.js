@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const { sendMessage, getMessages } = require('../controllers/messageController');
 const { sendWhatsAppText } = require('../services/whatsapp');
+const { isEnabled, cleanEnv } = require('../config/env');
 
 const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '');
 
@@ -189,7 +190,7 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
   }
 });
 
-if (process.env.ENABLE_SIMULATOR === 'true' || process.env.NODE_ENV !== 'production') {
+if (isEnabled(process.env.ENABLE_SIMULATOR) || cleanEnv(process.env.NODE_ENV) !== 'production') {
   // SOLO PARA PRUEBAS — desactivado por defecto en producción.
   router.post('/simulate', async (req, res) => {
     const { phone, name, text } = req.body;

@@ -1,11 +1,12 @@
 const messageQueue = require('../queues/messageQueue');
+const { cleanEnv } = require('../config/env');
 
 const verifyWebhook = (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode === 'subscribe' && token === process.env.WA_VERIFY_TOKEN) {
+  if (mode === 'subscribe' && token === cleanEnv(process.env.WA_VERIFY_TOKEN)) {
     console.log('✅ Webhook verificado por Meta');
     res.status(200).send(challenge);
   } else {

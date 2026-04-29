@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { cleanEnv } = require('../config/env');
 
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -9,7 +10,7 @@ const authMiddleware = (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, cleanEnv(process.env.JWT_SECRET, 'change_this_in_production'));
     req.agent = decoded;
     next();
   } catch (err) {

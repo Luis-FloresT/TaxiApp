@@ -1,11 +1,14 @@
 const Redis = require('ioredis');
 require('dotenv').config();
+const { cleanEnv } = require('./env');
 
-const redis = process.env.REDIS_URL
-  ? new Redis(process.env.REDIS_URL)
+const redisUrl = cleanEnv(process.env.REDIS_URL);
+
+const redis = redisUrl
+  ? new Redis(redisUrl)
   : new Redis({
-      host: process.env.REDIS_HOST,
-      port: process.env.REDIS_PORT,
+      host: cleanEnv(process.env.REDIS_HOST),
+      port: cleanEnv(process.env.REDIS_PORT),
     });
 
 redis.on('connect', () => console.log('✅ Redis conectado'));

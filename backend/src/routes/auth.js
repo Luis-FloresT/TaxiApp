@@ -3,6 +3,12 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
+const { cleanEnv } = require('../config/env');
+
+const getJwtConfig = () => ({
+  secret: cleanEnv(process.env.JWT_SECRET, 'change_this_in_production'),
+  expiresIn: cleanEnv(process.env.JWT_EXPIRES, '8h')
+});
 
 // Login
 router.post('/login', async (req, res) => {
@@ -25,10 +31,11 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Contraseña incorrecta' });
     }
 
+    const jwtConfig = getJwtConfig();
     const token = jwt.sign(
       { id: agent.id, name: agent.name, username: agent.username },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES }
+      jwtConfig.secret,
+      { expiresIn: jwtConfig.expiresIn }
     );
 
     res.json({
@@ -41,7 +48,7 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('❌ Error login:', err.message);
+    console.error('❌ Error login:', err.message, err.stack);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -54,7 +61,7 @@ router.get('/me', async (req, res) => {
   if (!token) return res.status(401).json({ error: 'No autorizado' });
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, getJwtConfig().secret);
     res.json({ agent: decoded });
   } catch {
     res.status(403).json({ error: 'Token inválido' });

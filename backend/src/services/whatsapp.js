@@ -1,10 +1,11 @@
 const axios = require('axios');
+const { cleanEnv } = require('../config/env');
 
 const canUseMetaApi = () =>
-  process.env.WA_ACCESS_TOKEN &&
-  process.env.WA_ACCESS_TOKEN !== 'pending' &&
-  process.env.WA_PHONE_ID &&
-  process.env.WA_PHONE_ID !== 'pending';
+  cleanEnv(process.env.WA_ACCESS_TOKEN) &&
+  cleanEnv(process.env.WA_ACCESS_TOKEN) !== 'pending' &&
+  cleanEnv(process.env.WA_PHONE_ID) &&
+  cleanEnv(process.env.WA_PHONE_ID) !== 'pending';
 
 const sendWhatsAppText = async (to, text) => {
   if (!canUseMetaApi()) {
@@ -13,7 +14,7 @@ const sendWhatsAppText = async (to, text) => {
   }
 
   await axios.post(
-    `https://graph.facebook.com/v18.0/${process.env.WA_PHONE_ID}/messages`,
+    `https://graph.facebook.com/v18.0/${cleanEnv(process.env.WA_PHONE_ID)}/messages`,
     {
       messaging_product: 'whatsapp',
       to,
@@ -22,7 +23,7 @@ const sendWhatsAppText = async (to, text) => {
     },
     {
       headers: {
-        Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}`
+        Authorization: `Bearer ${cleanEnv(process.env.WA_ACCESS_TOKEN)}`
       }
     }
   );

@@ -1,11 +1,13 @@
 const Queue = require('bull');
 require('dotenv').config();
 const { sendWhatsAppText } = require('../services/whatsapp');
+const { cleanEnv } = require('../config/env');
 
-const redisConfig = process.env.REDIS_URL || {
+const redisUrl = cleanEnv(process.env.REDIS_URL);
+const redisConfig = redisUrl || {
   redis: {
-    host: process.env.REDIS_HOST,
-    port: process.env.REDIS_PORT
+    host: cleanEnv(process.env.REDIS_HOST),
+    port: cleanEnv(process.env.REDIS_PORT)
   }
 };
 

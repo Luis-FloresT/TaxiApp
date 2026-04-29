@@ -1,18 +1,22 @@
 const { Pool } = require('pg');
 require('dotenv').config();
+const { cleanEnv, isEnabled } = require('./env');
 
-const poolConfig = process.env.DATABASE_URL
+const databaseUrl = cleanEnv(process.env.DATABASE_URL);
+const dbSsl = isEnabled(process.env.DB_SSL);
+
+const poolConfig = databaseUrl
   ? {
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false
+      connectionString: databaseUrl,
+      ssl: dbSsl ? { rejectUnauthorized: false } : false
     }
   : {
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT,
-      database: process.env.DB_NAME,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false
+      host: cleanEnv(process.env.DB_HOST),
+      port: cleanEnv(process.env.DB_PORT),
+      database: cleanEnv(process.env.DB_NAME),
+      user: cleanEnv(process.env.DB_USER),
+      password: cleanEnv(process.env.DB_PASSWORD),
+      ssl: dbSsl ? { rejectUnauthorized: false } : false
     };
 
 const pool = new Pool(poolConfig);

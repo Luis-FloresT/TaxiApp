@@ -4,13 +4,15 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const authMiddleware = require('./src/middlewares/auth');
+const pool = require('./src/config/db');
+const { cleanEnv, isEnabled } = require('./src/config/env');
 
-const isProduction = process.env.NODE_ENV === 'production';
-const allowedOrigins = (process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '')
+const isProduction = cleanEnv(process.env.NODE_ENV) === 'production';
+const allowedOrigins = (cleanEnv(process.env.CORS_ORIGIN) || cleanEnv(process.env.FRONTEND_URL))
   .split(',')
   .map(origin => origin.trim())
   .filter(Boolean);
-const enableSimulator = process.env.ENABLE_SIMULATOR === 'true' || !isProduction;
+const enableSimulator = isEnabled(process.env.ENABLE_SIMULATOR) || !isProduction;
 const corsOptions = {
   origin: (origin, callback) => {
     if (!isProduction || !origin || allowedOrigins.includes(origin)) {
@@ -37,8 +39,18 @@ app.get('/health', (req, res) => {
   res.json({
     ok: true,
     env: isProduction ? 'production' : 'development',
-    whatsapp: process.env.WA_ACCESS_TOKEN === 'pending' ? 'simulated' : 'configured'
+    whatsapp: cleanEnv(process.env.WA_ACCESS_TOKEN) === 'pending' ? 'simulated' : 'configured'
   });
+});
+
+app.get('/health/db', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT NOW() as now');
+    res.json({ ok: true, now: result.rows[0].now });
+  } catch (error) {
+    console.error('❌ Health DB error:', error.message);
+    res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
 // Rutas públicas (sin token)
