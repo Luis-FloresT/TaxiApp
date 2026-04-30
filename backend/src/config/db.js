@@ -2,7 +2,9 @@ const { Pool } = require('pg');
 require('dotenv').config();
 const { cleanEnv, isEnabled } = require('./env');
 
-const databaseUrl = cleanEnv(process.env.DATABASE_URL);
+const publicDatabaseUrl = cleanEnv(process.env.DATABASE_PUBLIC_URL);
+const privateDatabaseUrl = cleanEnv(process.env.DATABASE_URL);
+const databaseUrl = publicDatabaseUrl || privateDatabaseUrl;
 const dbSsl = isEnabled(process.env.DB_SSL);
 const dbConnectTimeoutMs = Number(cleanEnv(process.env.DB_CONNECT_TIMEOUT_MS, '10000'));
 
