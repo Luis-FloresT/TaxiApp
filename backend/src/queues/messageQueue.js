@@ -67,7 +67,7 @@ const processJob = async (data) => {
     }
   }
 
-  const { io } = require('../index');
+  const { io } = require('../../index');
   io.emit('new_message', {
     chatId, from, contactName, text,
     timestamp: new Date(),
