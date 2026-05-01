@@ -22,11 +22,13 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
     loadChats();
     socket.on('new_message', handleNewMessage);
     socket.on('message_sent', handleNewMessage);
+    window.addEventListener('chats:refresh', handleNewMessage);
 
     return () => {
       active = false;
       socket.off('new_message', handleNewMessage);
       socket.off('message_sent', handleNewMessage);
+      window.removeEventListener('chats:refresh', handleNewMessage);
     };
   }, []);
 

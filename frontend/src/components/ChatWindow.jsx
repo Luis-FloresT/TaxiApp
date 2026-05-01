@@ -153,6 +153,7 @@ const ChatWindow = ({ chat }) => {
       ]);
       setDrivers(driversRes.data);
       setMessages(messagesRes.data);
+      window.dispatchEvent(new Event('chats:refresh'));
       alert('Carrera enviada al taxista por WhatsApp');
     } catch (error) {
       console.error('Error despachando taxista:', error);

@@ -78,6 +78,21 @@ const buildDispatchMessage = ({ chat, lastClientMessage, lastLocationMessage, no
   return lines.join('\n');
 };
 
+const buildClientDriverConfirmation = ({ driverName, driverPhone, vehicleLabel }) => {
+  const lines = [
+    'Su taxi ha sido confirmado y estará allá en breve.',
+    '',
+    `Taxista: ${driverName || 'Taxista asignado'}`,
+    `Celular: +${driverPhone}`
+  ];
+
+  if (vehicleLabel) {
+    lines.push(`Móvil: ${vehicleLabel}`);
+  }
+
+  return lines.join('\n');
+};
+
 // Obtener todos los chats
 router.get('/', async (req, res) => {
   const result = await pool.query(
@@ -168,8 +183,14 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
       notes,
       driverName: selectedDriverName
     });
+    const clientConfirmationText = buildClientDriverConfirmation({
+      driverName: selectedDriverName,
+      driverPhone: normalizedDriverPhone,
+      vehicleLabel: selectedVehicleLabel
+    });
 
     await sendWhatsAppText(normalizedDriverPhone, dispatchText);
+    await sendWhatsAppText(chat.phone_number, clientConfirmationText);
 
     if (saveDriver && !driverId) {
       await pool.query(
@@ -208,6 +229,11 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
        VALUES ($1, $2, true, 'dispatch')`,
       [chatId, dispatchLog]
     );
+    await pool.query(
+      `INSERT INTO messages (chat_id, content, from_agent, message_type)
+       VALUES ($1, $2, true, 'text')`,
+      [chatId, clientConfirmationText]
+    );
 
     const driverChatId = await upsertDriverChat({
       driverPhone: normalizedDriverPhone,
@@ -218,7 +244,7 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
     });
 
     const { io } = require('../../index');
-    io.emit('message_sent', { chatId, text: dispatchLog, fromAgent: true });
+    io.emit('message_sent', { chatId, text: clientConfirmationText, fromAgent: true });
     io.emit('message_sent', { chatId: driverChatId, text: dispatchText, fromAgent: true });
 
     res.status(201).json({
