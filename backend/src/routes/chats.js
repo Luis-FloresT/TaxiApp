@@ -7,6 +7,41 @@ const { isEnabled, cleanEnv } = require('../config/env');
 
 const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '');
 
+const upsertDriverChat = async ({ driverPhone, driverName, vehicleLabel, dispatchText, sourceChat }) => {
+  const fallbackName = driverName || `Taxista +${driverPhone}`;
+  const driverChatResult = await pool.query(
+    `INSERT INTO chats (phone_number, contact_name, status, bot_active, bot_step)
+     VALUES ($1, $2, 'active', false, 'agent')
+     ON CONFLICT (phone_number) DO UPDATE SET
+       contact_name = COALESCE(NULLIF(EXCLUDED.contact_name, ''), chats.contact_name),
+       status = 'active',
+       bot_active = false,
+       bot_step = 'agent',
+       updated_at = NOW()
+     RETURNING id`,
+    [driverPhone, fallbackName]
+  );
+
+  const label = driverName || `+${driverPhone}`;
+  const vehicleText = vehicleLabel ? ` · ${vehicleLabel}` : '';
+  const clientName = sourceChat.contact_name || `+${sourceChat.phone_number}`;
+  const driverChatMessage = [
+    `Carrera enviada a ${label}${vehicleText}`,
+    `Cliente: ${clientName}`,
+    `Teléfono cliente: +${sourceChat.phone_number}`,
+    '',
+    dispatchText
+  ].join('\n');
+
+  await pool.query(
+    `INSERT INTO messages (chat_id, content, from_agent, message_type)
+     VALUES ($1, $2, true, 'driver_dispatch')`,
+    [driverChatResult.rows[0].id, driverChatMessage]
+  );
+
+  return driverChatResult.rows[0].id;
+};
+
 const buildDispatchMessage = ({ chat, lastClientMessage, lastLocationMessage, notes, driverName }) => {
   const lines = [
     'NUEVA CARRERA',
@@ -174,15 +209,25 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
       [chatId, dispatchLog]
     );
 
+    const driverChatId = await upsertDriverChat({
+      driverPhone: normalizedDriverPhone,
+      driverName: selectedDriverName,
+      vehicleLabel: selectedVehicleLabel,
+      dispatchText,
+      sourceChat: chat
+    });
+
     const { io } = require('../../index');
     io.emit('message_sent', { chatId, text: dispatchLog, fromAgent: true });
+    io.emit('message_sent', { chatId: driverChatId, text: dispatchText, fromAgent: true });
 
     res.status(201).json({
       success: true,
       driver_phone: normalizedDriverPhone,
       driver_name: selectedDriverName || null,
       driver_vehicle_label: selectedVehicleLabel || null,
-      driver_dispatched_at: new Date().toISOString()
+      driver_dispatched_at: new Date().toISOString(),
+      driver_chat_id: driverChatId
     });
   } catch (error) {
     console.error('❌ Error despachando taxista:', error.message);
