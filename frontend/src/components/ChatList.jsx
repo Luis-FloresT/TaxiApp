@@ -22,20 +22,26 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
     loadChats();
     socket.on('new_message', handleNewMessage);
     socket.on('message_sent', handleNewMessage);
+    socket.on('chat_updated', handleNewMessage);
+    socket.on('chat_deleted', handleNewMessage);
     window.addEventListener('chats:refresh', handleNewMessage);
 
     return () => {
       active = false;
       socket.off('new_message', handleNewMessage);
       socket.off('message_sent', handleNewMessage);
+      socket.off('chat_updated', handleNewMessage);
+      socket.off('chat_deleted', handleNewMessage);
       window.removeEventListener('chats:refresh', handleNewMessage);
     };
   }, []);
 
+  const openChats = chats.filter(chat => chat.status !== 'closed');
   const visibleChats = chats.filter(chat => {
+    if (filter === 'archived') return chat.status === 'closed';
     if (filter === 'pending') return chat.status === 'pending';
     if (filter === 'active') return chat.status === 'active';
-    return true;
+    return chat.status !== 'closed';
   });
 
   const getStatusColor = (status) => {
@@ -47,7 +53,7 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
   const getStatusLabel = (status) => {
     if (status === 'pending') return 'Pendiente';
     if (status === 'active') return 'Activo';
-    return 'Cerrado';
+    return 'Archivado';
   };
 
   return (
@@ -57,15 +63,16 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-gray-700">Chats</h2>
           <span className="bg-green-500 text-white text-xs px-2 py-1 rounded-full">
-            {chats.length}
+            {openChats.length}
           </span>
         </div>
         {/* Filtros */}
-        <div className="flex gap-2 mt-2">
+        <div className="flex flex-wrap gap-2 mt-2">
           {[
             ['all', 'Todos'],
             ['pending', 'Pendientes'],
-            ['active', 'Activos']
+            ['active', 'Activos'],
+            ['archived', 'Archivados']
           ].map(([value, label]) => (
             <button
               key={value}

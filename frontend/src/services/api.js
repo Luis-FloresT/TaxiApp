@@ -39,6 +39,9 @@ export const changePassword = (username, currentPassword, newPassword) =>
 
 export const getChats = () => API.get('/chats');
 export const getMessages = (chatId) => API.get(`/chats/${chatId}/messages`);
+export const archiveChat = (chatId) => API.patch(`/chats/${chatId}/archive`);
+export const restoreChat = (chatId) => API.patch(`/chats/${chatId}/restore`);
+export const deleteChat = (chatId) => API.delete(`/chats/${chatId}`);
 export const sendMessage = (to, text, chatId) =>
   API.post('/chats/send', { to, text, chatId });
 export const dispatchDriver = (chatId, payload) =>

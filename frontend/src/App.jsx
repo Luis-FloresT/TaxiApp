@@ -38,6 +38,18 @@ function App() {
     setSelectedChat(null);
   };
 
+  const handleChatDeleted = (chatId) => {
+    setSelectedChat(current => (current?.id === chatId ? null : current));
+    window.dispatchEvent(new Event('chats:refresh'));
+  };
+
+  const handleChatUpdated = (chatData) => {
+    setSelectedChat(current => (
+      current?.id === chatData.id ? { ...current, ...chatData } : current
+    ));
+    window.dispatchEvent(new Event('chats:refresh'));
+  };
+
   if (!agent) return <Login onLogin={handleLogin} />;
 
   return (
@@ -53,7 +65,12 @@ function App() {
           selectedChatId={selectedChat?.id}
         />
         {selectedChat ? (
-          <ChatWindow key={selectedChat.id} chat={selectedChat} />
+          <ChatWindow
+            key={selectedChat.id}
+            chat={selectedChat}
+            onChatDeleted={handleChatDeleted}
+            onChatUpdated={handleChatUpdated}
+          />
         ) : (
           <div className="flex-1 flex items-center justify-center bg-gray-50">
             <div className="text-center text-gray-400">

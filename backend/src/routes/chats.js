@@ -109,6 +109,86 @@ router.get('/', async (req, res) => {
 // Obtener mensajes de un chat
 router.get('/:chatId/messages', getMessages);
 
+// Archivar chat sin borrar historial
+router.patch('/:chatId/archive', async (req, res) => {
+  const { chatId } = req.params;
+
+  try {
+    const result = await pool.query(
+      `UPDATE chats
+       SET status = 'closed', updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [chatId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Chat no encontrado' });
+    }
+
+    const { io } = require('../../index');
+    io.emit('chat_updated', { chatId: Number(chatId), status: 'closed' });
+
+    res.json({ success: true, chat: result.rows[0] });
+  } catch (error) {
+    console.error('❌ Error archivando chat:', error.message);
+    res.status(500).json({ error: 'No se pudo archivar el chat' });
+  }
+});
+
+// Restaurar chat archivado
+router.patch('/:chatId/restore', async (req, res) => {
+  const { chatId } = req.params;
+
+  try {
+    const result = await pool.query(
+      `UPDATE chats
+       SET status = 'active', updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [chatId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Chat no encontrado' });
+    }
+
+    const { io } = require('../../index');
+    io.emit('chat_updated', { chatId: Number(chatId), status: 'active' });
+
+    res.json({ success: true, chat: result.rows[0] });
+  } catch (error) {
+    console.error('❌ Error restaurando chat:', error.message);
+    res.status(500).json({ error: 'No se pudo restaurar el chat' });
+  }
+});
+
+// Borrar chat y sus mensajes
+router.delete('/:chatId', async (req, res) => {
+  const { chatId } = req.params;
+
+  try {
+    const result = await pool.query(
+      `DELETE FROM chats
+       WHERE id = $1
+       RETURNING id`,
+      [chatId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Chat no encontrado' });
+    }
+
+    const { io } = require('../../index');
+    io.emit('chat_deleted', { chatId: Number(chatId) });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error borrando chat:', error.message);
+    res.status(500).json({ error: 'No se pudo borrar el chat' });
+  }
+});
+
 // Enviar mensaje
 router.post('/send', sendMessage);
 

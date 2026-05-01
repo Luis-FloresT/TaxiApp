@@ -1,9 +1,18 @@
 import { useEffect, useState, useRef } from 'react';
-import { dispatchDriver, getDrivers, getMessages, sendMessage, toggleBot } from '../services/api';
+import {
+  archiveChat,
+  deleteChat,
+  dispatchDriver,
+  getDrivers,
+  getMessages,
+  restoreChat,
+  sendMessage,
+  toggleBot
+} from '../services/api';
 import socket from '../services/socket';
 import QuickReplies from './QuickReplies';
 
-const ChatWindow = ({ chat }) => {
+const ChatWindow = ({ chat, onChatDeleted, onChatUpdated }) => {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const [drivers, setDrivers] = useState([]);
@@ -24,6 +33,8 @@ const ChatWindow = ({ chat }) => {
   const [sending, setSending] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [botActive, setBotActive] = useState(chat.bot_active ?? true);
+  const [isArchived, setIsArchived] = useState(chat.status === 'closed');
+  const [chatAction, setChatAction] = useState('');
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -66,10 +77,16 @@ const ChatWindow = ({ chat }) => {
   }, [chat.id]);
 
   useEffect(() => {
+    setIsArchived(chat.status === 'closed');
+    setBotActive(chat.bot_active ?? true);
+  }, [chat.id, chat.status, chat.bot_active]);
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const handleSend = async () => {
+    if (isArchived) return;
     if (!text.trim()) return;
     setSending(true);
     try {
@@ -93,6 +110,7 @@ const ChatWindow = ({ chat }) => {
   };
 
   const handleToggleBot = async () => {
+    if (isArchived) return;
     const nextActive = !botActive;
     try {
       await toggleBot(chat.id, nextActive);
@@ -123,6 +141,11 @@ const ChatWindow = ({ chat }) => {
   };
 
   const handleDispatch = async () => {
+    if (isArchived) {
+      alert('Restaura el chat antes de despachar una carrera');
+      return;
+    }
+
     if (!driverPhone.trim()) {
       alert('Ingresa el número del taxista');
       return;
@@ -160,6 +183,51 @@ const ChatWindow = ({ chat }) => {
       alert(error.response?.data?.error || 'No se pudo despachar la carrera');
     } finally {
       setDispatching(false);
+    }
+  };
+
+  const handleArchive = async () => {
+    if (!confirm('¿Archivar este chat? Podrás verlo en Archivados.')) return;
+
+    setChatAction('archive');
+    try {
+      const res = await archiveChat(chat.id);
+      setIsArchived(true);
+      onChatUpdated?.(res.data.chat);
+    } catch (error) {
+      console.error('Error archivando chat:', error);
+      alert(error.response?.data?.error || 'No se pudo archivar el chat');
+    } finally {
+      setChatAction('');
+    }
+  };
+
+  const handleRestore = async () => {
+    setChatAction('restore');
+    try {
+      const res = await restoreChat(chat.id);
+      setIsArchived(false);
+      onChatUpdated?.(res.data.chat);
+    } catch (error) {
+      console.error('Error restaurando chat:', error);
+      alert(error.response?.data?.error || 'No se pudo restaurar el chat');
+    } finally {
+      setChatAction('');
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('¿Borrar este chat definitivamente? También se borrará su historial.')) return;
+
+    setChatAction('delete');
+    try {
+      await deleteChat(chat.id);
+      onChatDeleted?.(chat.id);
+    } catch (error) {
+      console.error('Error borrando chat:', error);
+      alert(error.response?.data?.error || 'No se pudo borrar el chat');
+    } finally {
+      setChatAction('');
     }
   };
 
@@ -250,25 +318,53 @@ const ChatWindow = ({ chat }) => {
         <div className="flex items-center gap-2">
           <button
             onClick={handleToggleBot}
+            disabled={isArchived}
             className={"flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors " + (botActive
-              ? 'bg-blue-50 border-blue-300 text-blue-600 hover:bg-blue-100'
-              : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100')}
+              ? 'bg-blue-50 border-blue-300 text-blue-600 hover:bg-blue-100 disabled:opacity-50'
+              : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100 disabled:opacity-50')}
           >
             {"🤖 " + (botActive ? 'Bot activo' : 'Bot inactivo')}
           </button>
 
           <button
             onClick={() => setDispatchOpen(!dispatchOpen)}
+            disabled={isArchived}
             className={"text-sm px-3 py-1.5 rounded-lg border transition-colors " + (dispatchOpen
               ? 'bg-green-500 text-white border-green-500'
-              : 'bg-white text-green-600 border-green-300 hover:bg-green-50')}
+              : 'bg-white text-green-600 border-green-300 hover:bg-green-50 disabled:opacity-50')}
           >
             🚕 Despachar taxista
+          </button>
+
+          {isArchived ? (
+            <button
+              onClick={handleRestore}
+              disabled={chatAction === 'restore'}
+              className="text-sm px-3 py-1.5 rounded-lg border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+            >
+              {chatAction === 'restore' ? 'Restaurando...' : 'Restaurar'}
+            </button>
+          ) : (
+            <button
+              onClick={handleArchive}
+              disabled={chatAction === 'archive'}
+              className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 bg-white hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              {chatAction === 'archive' ? 'Archivando...' : 'Archivar'}
+            </button>
+          )}
+
+          <button
+            onClick={handleDelete}
+            disabled={chatAction === 'delete'}
+            className="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-red-600 bg-white hover:bg-red-50 disabled:opacity-50 transition-colors"
+          >
+            {chatAction === 'delete' ? 'Borrando...' : 'Borrar'}
           </button>
         </div>
       </div>
 
-      {dispatchOpen && (
+      {dispatchOpen && !isArchived && (
         <div className="bg-green-50 border-b border-green-100 px-6 py-4">
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
             <div className="lg:col-span-2">
@@ -357,7 +453,15 @@ const ChatWindow = ({ chat }) => {
         </div>
       )}
 
-      {botActive && (
+      {isArchived && (
+        <div className="bg-gray-100 border-b border-gray-200 px-6 py-2 flex items-center justify-between">
+          <div className="text-gray-600 text-sm">
+            Chat archivado. Restaúralo para responder o despachar otra carrera.
+          </div>
+        </div>
+      )}
+
+      {botActive && !isArchived && (
         <div className="bg-blue-50 border-b border-blue-100 px-6 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2 text-blue-600 text-sm">
             <span className="animate-pulse">🤖</span>
@@ -440,7 +544,7 @@ const ChatWindow = ({ chat }) => {
       </div>
 
       <div className="bg-white border-t border-gray-200 p-4">
-        {botActive && (
+        {botActive && !isArchived && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-2 mb-3">
             <p className="text-xs text-yellow-700">
               ⚠️ El bot está activo. Si escribes, tomarás control automáticamente.
@@ -458,9 +562,10 @@ const ChatWindow = ({ chat }) => {
           <div className="flex items-end gap-3">
             <button
               onClick={() => setShowQuickReplies(!showQuickReplies)}
+              disabled={isArchived}
               className={"p-2.5 rounded-xl border transition-colors flex-shrink-0 " + (showQuickReplies
                 ? 'bg-green-500 text-white border-green-500'
-                : 'border-gray-200 text-gray-500 hover:bg-gray-50')}
+                : 'border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-50')}
             >
               ⚡
             </button>
@@ -473,13 +578,14 @@ const ChatWindow = ({ chat }) => {
                 }
               }}
               onKeyDown={handleKeyDown}
-              placeholder={botActive ? 'Escribe para tomar control del chat...' : 'Escribe un mensaje... (Enter para enviar)'}
+              disabled={isArchived}
+              placeholder={isArchived ? 'Chat archivado' : botActive ? 'Escribe para tomar control del chat...' : 'Escribe un mensaje... (Enter para enviar)'}
               rows={2}
-              className="flex-1 border border-gray-200 rounded-xl px-4 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-400"
+              className="flex-1 border border-gray-200 rounded-xl px-4 py-2 text-sm resize-none disabled:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-green-400"
             />
             <button
               onClick={handleSend}
-              disabled={sending || !text.trim()}
+              disabled={isArchived || sending || !text.trim()}
               className="bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white px-5 py-2.5 rounded-xl font-medium text-sm transition-colors flex items-center gap-2 flex-shrink-0"
             >
               {sending ? '...' : '➤ Enviar'}
