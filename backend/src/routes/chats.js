@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { sendMessage, getMessages } = require('../controllers/messageController');
-const { sendWhatsAppText } = require('../services/whatsapp');
+const { trySendWhatsAppText } = require('../services/whatsapp');
 const { isEnabled, cleanEnv } = require('../config/env');
 
 const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '');
@@ -269,8 +269,8 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
       vehicleLabel: selectedVehicleLabel
     });
 
-    await sendWhatsAppText(normalizedDriverPhone, dispatchText);
-    await sendWhatsAppText(chat.phone_number, clientConfirmationText);
+    const driverSendResult = await trySendWhatsAppText(normalizedDriverPhone, dispatchText);
+    const clientSendResult = await trySendWhatsAppText(chat.phone_number, clientConfirmationText);
 
     if (saveDriver && !driverId) {
       await pool.query(
@@ -333,7 +333,11 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
       driver_name: selectedDriverName || null,
       driver_vehicle_label: selectedVehicleLabel || null,
       driver_dispatched_at: new Date().toISOString(),
-      driver_chat_id: driverChatId
+      driver_chat_id: driverChatId,
+      whatsapp_delivery: {
+        driver: driverSendResult,
+        client: clientSendResult
+      }
     });
   } catch (error) {
     console.error('❌ Error despachando taxista:', error.message);

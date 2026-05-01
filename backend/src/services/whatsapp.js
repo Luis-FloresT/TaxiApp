@@ -31,4 +31,23 @@ const sendWhatsAppText = async (to, text) => {
   return { simulated: false };
 };
 
-module.exports = { canUseMetaApi, sendWhatsAppText };
+const trySendWhatsAppText = async (to, text) => {
+  try {
+    const result = await sendWhatsAppText(to, text);
+    return { ok: true, ...result };
+  } catch (error) {
+    const metaError = error.response?.data?.error;
+    console.error(
+      `⚠️ WhatsApp no pudo enviar a ${to}:`,
+      metaError?.message || error.message
+    );
+    return {
+      ok: false,
+      simulated: false,
+      error: metaError?.message || error.message,
+      code: metaError?.code || null
+    };
+  }
+};
+
+module.exports = { canUseMetaApi, sendWhatsAppText, trySendWhatsAppText };
