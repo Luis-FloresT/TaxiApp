@@ -5,9 +5,11 @@ import ChatWindow from './components/ChatWindow';
 import Login from './components/Login';
 import Simulator from './components/Simulator';
 import BotConfig from './components/BotConfig';
+import LegalPage from './components/LegalPage';
 
 function App() {
   const simulatorEnabled = import.meta.env.VITE_ENABLE_SIMULATOR === 'true' || import.meta.env.DEV;
+  const path = window.location.pathname;
   const [selectedChat, setSelectedChat] = useState(null);
   const [agent, setAgent] = useState(() => {
     const savedAgent = localStorage.getItem('agent');
@@ -25,7 +27,11 @@ function App() {
   });
   const [showBotConfig, setShowBotConfig] = useState(false);
 
-  if (window.location.pathname === '/simulator' && simulatorEnabled) {
+  if (['/privacy', '/terms', '/data-deletion'].includes(path)) {
+    return <LegalPage path={path} />;
+  }
+
+  if (path === '/simulator' && simulatorEnabled) {
     return <Simulator />;
   }
 
