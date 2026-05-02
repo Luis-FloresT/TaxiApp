@@ -243,7 +243,8 @@ UPDATE agents SET role = 'admin' WHERE username = 'operador1';
 UPDATE chats
 SET contact_type = 'driver',
     bot_active = false,
-    bot_step = 'driver'
+    bot_step = 'driver',
+    status = CASE WHEN status = 'closed' THEN status ELSE 'active' END
 WHERE contact_type <> 'driver'
   AND (
     related_client_chat_id IS NOT NULL

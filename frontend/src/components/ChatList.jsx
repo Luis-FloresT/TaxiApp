@@ -162,8 +162,8 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
               </div>
               {/* Footer */}
               <div className="flex items-center justify-between mt-2">
-                <span className={`text-xs px-2 py-0.5 rounded-full text-white ${getStatusColor(chat.status)}`}>
-                  {getStatusLabel(chat.status)}
+                <span className={`text-xs px-2 py-0.5 rounded-full text-white ${isDriver ? 'bg-blue-500' : getStatusColor(chat.status)}`}>
+                  {isDriver ? 'Taxista' : getStatusLabel(chat.status)}
                 </span>
                 {!isDriver && chat.assigned_driver_phone && (
                   <span
