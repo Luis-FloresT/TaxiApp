@@ -17,6 +17,8 @@ const driverStatusColumns = {
   cancelled: 'cancelled_at'
 };
 
+const terminalRideStatuses = ['completed', 'cancelled'];
+
 const detectDriverCommand = (text) =>
   driverCommands.find(command => command.pattern.test(String(text || '').trim()));
 
@@ -86,7 +88,7 @@ const upsertIncomingChat = async ({ pool, from, contactName, contactType }) => {
          ELSE chats.bot_step
        END,
        updated_at = NOW()
-     RETURNING id, contact_type`,
+     RETURNING id, contact_type, ride_status`,
     [
       from,
       contactName,
@@ -100,6 +102,41 @@ const upsertIncomingChat = async ({ pool, from, contactName, contactType }) => {
   return result.rows[0];
 };
 
+const prepareCustomerForNewRide = async (pool, chatId) => {
+  await pool.query(
+    `UPDATE chats
+     SET status = 'pending',
+         ride_status = 'pending',
+         assigned_driver_phone = NULL,
+         assigned_driver_name = NULL,
+         assigned_driver_vehicle_label = NULL,
+         driver_dispatched_at = NULL,
+         driver_accepted_at = NULL,
+         driver_en_route_at = NULL,
+         picked_up_at = NULL,
+         completed_at = NULL,
+         cancelled_at = NULL,
+         bot_active = true,
+         bot_step = 'welcome',
+         updated_at = NOW()
+     WHERE id = $1
+       AND contact_type = 'customer'
+       AND ride_status IN ('completed', 'cancelled')`,
+    [chatId]
+  );
+};
+
+const reopenCustomerBotAfterRide = async (pool, chatId) => {
+  await pool.query(
+    `UPDATE chats
+     SET bot_active = true,
+         bot_step = 'welcome',
+         updated_at = NOW()
+     WHERE id = $1 AND contact_type = 'customer'`,
+    [chatId]
+  );
+};
+
 const processJob = async (data) => {
   const { from, text, waMessageId, contactName, locationData, messageType } = data;
   const pool = require('../config/db');
@@ -109,6 +146,10 @@ const processJob = async (data) => {
   const contactType = await getIncomingContactRole(pool, from);
   const chat = await upsertIncomingChat({ pool, from, contactName, contactType });
   const chatId = chat.id;
+
+  if (contactType === 'customer' && terminalRideStatuses.includes(chat.ride_status)) {
+    await prepareCustomerForNewRide(pool, chatId);
+  }
 
   await pool.query(
     `INSERT INTO messages (chat_id, content, from_agent, wa_message_id, message_type,
@@ -155,13 +196,14 @@ const processJob = async (data) => {
         );
       }
 
-      if (['completed', 'cancelled'].includes(driverCommand.status)) {
+      if (terminalRideStatuses.includes(driverCommand.status)) {
         await pool.query(
           `UPDATE driver_contacts
            SET availability_status = 'available', updated_at = NOW()
            WHERE phone_number = $1`,
           [from]
         );
+        await reopenCustomerBotAfterRide(pool, assignedRide.id);
       }
 
       const { io } = require('../../index');
@@ -221,13 +263,14 @@ const processJob = async (data) => {
         );
       }
 
-      if (['completed', 'cancelled'].includes(driverCommand.status)) {
+      if (terminalRideStatuses.includes(driverCommand.status)) {
         await pool.query(
           `UPDATE driver_contacts
            SET availability_status = 'available', updated_at = NOW()
            WHERE phone_number = $1`,
           [from]
         );
+        await reopenCustomerBotAfterRide(pool, ride.id);
       }
 
       const { io } = require('../../index');

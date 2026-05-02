@@ -222,6 +222,7 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
     try {
       const res = await updateRideStatus(chat.id, nextStatus);
       setRideStatus(nextStatus);
+      setBotActive(res.data.chat.bot_active ?? botActive);
       onChatUpdated?.(res.data.chat);
       const messagesRes = await getMessages(chat.id);
       setMessages(messagesRes.data);

@@ -18,6 +18,7 @@ const rideStatusConfig = {
 };
 
 const allowedRideStatuses = Object.keys(rideStatusConfig);
+const terminalRideStatuses = ['completed', 'cancelled'];
 
 const upsertDriverChat = async ({ driverPhone, driverName, vehicleLabel, dispatchText, sourceChat }) => {
   const fallbackName = driverName || `Taxista +${driverPhone}`;
@@ -76,6 +77,8 @@ const updateRideStatus = async (chatId, nextStatus) => {
     `UPDATE chats
      SET ride_status = $1::text,
          status = CASE WHEN $1::text IN ('completed', 'cancelled') THEN status ELSE 'active' END,
+         bot_active = CASE WHEN $1::text IN ('completed', 'cancelled') AND contact_type = 'customer' THEN true ELSE bot_active END,
+         bot_step = CASE WHEN $1::text IN ('completed', 'cancelled') AND contact_type = 'customer' THEN 'welcome' ELSE bot_step END,
          updated_at = NOW()
          ${timestampSet}
      WHERE id = $2
@@ -231,7 +234,7 @@ router.patch('/:chatId/ride-status', async (req, res) => {
     const statusLabel = rideStatusConfig[nextStatus].label;
     await addRideNote(chatId, `Estado de carrera actualizado: ${statusLabel}`);
 
-    if (nextStatus === 'completed' && chat.assigned_driver_phone) {
+    if (terminalRideStatuses.includes(nextStatus) && chat.assigned_driver_phone) {
       await pool.query(
         `UPDATE driver_contacts
          SET availability_status = 'available', updated_at = NOW()
