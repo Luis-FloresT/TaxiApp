@@ -74,8 +74,8 @@ const updateRideStatus = async (chatId, nextStatus) => {
   const timestampSet = config.timestampColumn ? `, ${config.timestampColumn} = NOW()` : '';
   const result = await pool.query(
     `UPDATE chats
-     SET ride_status = $1,
-         status = CASE WHEN $1 IN ('completed', 'cancelled') THEN status ELSE 'active' END,
+     SET ride_status = $1::text,
+         status = CASE WHEN $1::text IN ('completed', 'cancelled') THEN status ELSE 'active' END,
          updated_at = NOW()
          ${timestampSet}
      WHERE id = $2
