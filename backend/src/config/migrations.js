@@ -37,6 +37,12 @@ const ensureOperationalSchema = async () => {
         related_client_chat_id IS NOT NULL
         OR phone_number IN (SELECT phone_number FROM driver_contacts WHERE active = true)
       );
+
+    UPDATE chats
+    SET bot_active = false,
+        bot_step = 'driver',
+        status = CASE WHEN status = 'closed' THEN status ELSE 'active' END
+    WHERE contact_type = 'driver';
   `);
 };
 
