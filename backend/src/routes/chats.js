@@ -333,7 +333,7 @@ router.delete('/bulk/customers', async (req, res) => {
            AND updated_at >= ${periods[period]}
            AND (
              $1::boolean = true
-             OR ride_status NOT IN ('dispatched', 'accepted', 'en_route', 'picked_up')
+             OR ride_status IN ('completed', 'cancelled')
            )
          RETURNING id
        )

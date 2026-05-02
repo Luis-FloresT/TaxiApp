@@ -77,8 +77,8 @@ const ChatList = ({ onSelectChat, selectedChatId, agent, onBulkDeleted }) => {
   const handleBulkDelete = async (period) => {
     const label = period === 'today' ? 'hoy' : 'los últimos 7 días';
     const activeText = includeOpenRides
-      ? 'También se borrarán carreras activas de clientes.'
-      : 'No se borrarán carreras activas, aceptadas, en camino o recogidas.';
+      ? 'También se borrarán clientes pendientes y carreras activas.'
+      : 'Solo se borrarán clientes finalizados o cancelados.';
     const ok = confirm(
       `¿Borrar chats de clientes de ${label}?\n\n${activeText}\n\nLos chats de taxistas no se borrarán.`
     );
@@ -138,7 +138,7 @@ const ChatList = ({ onSelectChat, selectedChatId, agent, onBulkDeleted }) => {
                   checked={includeOpenRides}
                   onChange={e => setIncludeOpenRides(e.target.checked)}
                 />
-                incluir activas
+                incluir pendientes/activas
               </label>
             </div>
             <div className="mt-2 grid grid-cols-2 gap-2">
