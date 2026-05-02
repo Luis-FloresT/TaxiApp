@@ -53,6 +53,11 @@ function App() {
     window.dispatchEvent(new Event('chats:refresh'));
   };
 
+  const handleBulkChatsDeleted = () => {
+    setSelectedChat(null);
+    window.dispatchEvent(new Event('chats:refresh'));
+  };
+
   const handleChatUpdated = (chatData) => {
     setSelectedChat(current => (
       current?.id === chatData.id ? { ...current, ...chatData } : current
@@ -75,6 +80,8 @@ function App() {
         <ChatList
           onSelectChat={setSelectedChat}
           selectedChatId={selectedChat?.id}
+          agent={agent}
+          onBulkDeleted={handleBulkChatsDeleted}
         />
         {selectedChat ? (
           <ChatWindow

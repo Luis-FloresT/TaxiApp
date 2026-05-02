@@ -45,6 +45,8 @@ export const updateRideStatus = (chatId, status) =>
 export const archiveChat = (chatId) => API.patch(`/chats/${chatId}/archive`);
 export const restoreChat = (chatId) => API.patch(`/chats/${chatId}/restore`);
 export const deleteChat = (chatId) => API.delete(`/chats/${chatId}`);
+export const bulkDeleteCustomerChats = (period, includeOpenRides = false) =>
+  API.delete('/chats/bulk/customers', { data: { period, includeOpenRides } });
 export const sendMessage = (to, text, chatId) =>
   API.post('/chats/send', { to, text, chatId });
 export const dispatchDriver = (chatId, payload) =>

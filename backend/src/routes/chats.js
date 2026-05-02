@@ -310,6 +310,56 @@ router.patch('/:chatId/restore', async (req, res) => {
 });
 
 // Borrar chat y sus mensajes
+router.delete('/bulk/customers', async (req, res) => {
+  const { period = 'today', includeOpenRides = false } = req.body || {};
+  const periods = {
+    today: "date_trunc('day', NOW())",
+    week: "NOW() - INTERVAL '7 days'"
+  };
+
+  if (req.agent?.role !== 'admin') {
+    return res.status(403).json({ error: 'Solo un administrador puede borrar chats en lote' });
+  }
+
+  if (!periods[period]) {
+    return res.status(400).json({ error: 'Periodo inválido' });
+  }
+
+  try {
+    const result = await pool.query(
+      `WITH deleted AS (
+         DELETE FROM chats
+         WHERE contact_type = 'customer'
+           AND updated_at >= ${periods[period]}
+           AND (
+             $1::boolean = true
+             OR ride_status NOT IN ('dispatched', 'accepted', 'en_route', 'picked_up')
+           )
+         RETURNING id
+       )
+       SELECT COALESCE(json_agg(id), '[]'::json) AS ids,
+              COUNT(*)::int AS deleted_count
+       FROM deleted`,
+      [Boolean(includeOpenRides)]
+    );
+
+    const payload = result.rows[0] || { ids: [], deleted_count: 0 };
+    const { io } = require('../../index');
+    io.emit('chat_deleted', { bulk: true, chatIds: payload.ids });
+
+    res.json({
+      success: true,
+      deleted_count: payload.deleted_count,
+      ids: payload.ids,
+      period,
+      include_open_rides: Boolean(includeOpenRides)
+    });
+  } catch (error) {
+    console.error('❌ Error borrando chats en lote:', error.message);
+    res.status(500).json({ error: 'No se pudieron borrar los chats en lote' });
+  }
+});
+
 router.delete('/:chatId', async (req, res) => {
   const { chatId } = req.params;
 
