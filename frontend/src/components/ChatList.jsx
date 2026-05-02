@@ -15,19 +15,23 @@ const rideLabels = {
 const ChatList = ({ onSelectChat, selectedChatId }) => {
   const [chats, setChats] = useState([]);
   const [filter, setFilter] = useState('all');
+  const [hasMore, setHasMore] = useState(false);
+  const pageSize = 80;
 
   useEffect(() => {
     let active = true;
 
     const loadChats = () => {
-      getChats()
+      getChats({ limit: pageSize, offset: 0 })
         .then(res => {
-          if (active) setChats(res.data);
+          if (!active) return;
+          setHasMore(res.headers['x-has-more'] === 'true');
+          setChats(res.data);
         })
         .catch(error => console.error('Error cargando chats:', error));
     };
 
-    const handleNewMessage = () => loadChats();
+    const handleNewMessage = () => loadChats(false);
 
     loadChats();
     socket.on('new_message', handleNewMessage);
@@ -165,6 +169,24 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
               );
             })()
           ))
+        )}
+        {hasMore && (
+          <div className="p-3">
+            <button
+              type="button"
+              onClick={() => {
+                getChats({ limit: pageSize, offset: chats.length })
+                  .then(res => {
+                    setHasMore(res.headers['x-has-more'] === 'true');
+                    setChats(current => [...current, ...res.data]);
+                  })
+                  .catch(error => console.error('Error cargando más chats:', error));
+              }}
+              className="w-full text-xs text-green-600 border border-green-100 rounded-lg py-2 hover:bg-green-50"
+            >
+              Cargar más chats
+            </button>
+          </div>
         )}
       </div>
     </div>

@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { sendWhatsAppText } = require('../services/whatsapp');
+const { getPagination } = require('../utils/pagination');
 
 const sendMessage = async (req, res) => {
   const { to, text, chatId } = req.body;
@@ -30,10 +31,21 @@ const sendMessage = async (req, res) => {
 
 const getMessages = async (req, res) => {
   const { chatId } = req.params;
+  const { limit, offset } = getPagination(req.query, { defaultLimit: 80, maxLimit: 200 });
   const result = await pool.query(
-    'SELECT * FROM messages WHERE chat_id = $1 ORDER BY timestamp ASC',
-    [chatId]
+    `SELECT *
+     FROM (
+       SELECT * FROM messages
+       WHERE chat_id = $1
+       ORDER BY timestamp DESC
+       LIMIT $2 OFFSET $3
+     ) recent
+     ORDER BY timestamp ASC`,
+    [chatId, limit, offset]
   );
+  res.set('X-Result-Limit', String(limit));
+  res.set('X-Result-Offset', String(offset));
+  res.set('X-Has-More', result.rows.length === limit ? 'true' : 'false');
   res.json(result.rows);
 };
 

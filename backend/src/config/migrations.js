@@ -18,6 +18,9 @@ const ensureOperationalSchema = async () => {
     CREATE INDEX IF NOT EXISTS idx_chats_ride_status ON chats(ride_status);
     CREATE INDEX IF NOT EXISTS idx_chats_assigned_driver_phone ON chats(assigned_driver_phone);
     CREATE INDEX IF NOT EXISTS idx_chats_related_client_chat ON chats(related_client_chat_id);
+    CREATE INDEX IF NOT EXISTS idx_chats_open_updated_at ON chats(updated_at DESC) WHERE status <> 'closed';
+    CREATE INDEX IF NOT EXISTS idx_messages_chat_timestamp_desc ON messages(chat_id, timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_messages_chat_type_timestamp ON messages(chat_id, message_type, timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_driver_contacts_availability ON driver_contacts(availability_status);
 
     UPDATE agents SET role = 'admin' WHERE username = 'operador1' AND role = 'operator';

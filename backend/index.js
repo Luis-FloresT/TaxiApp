@@ -4,6 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const authMiddleware = require('./src/middlewares/auth');
+const rateLimit = require('./src/middlewares/rateLimit');
 const pool = require('./src/config/db');
 const { cleanEnv, isEnabled } = require('./src/config/env');
 const { ensureOperationalSchema } = require('./src/config/migrations');
@@ -26,21 +27,35 @@ const corsOptions = {
 };
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: isProduction ? allowedOrigins : '*'
-  }
+  },
+  pingInterval: 25_000,
+  pingTimeout: 20_000
 });
 
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: cleanEnv(process.env.JSON_BODY_LIMIT, '256kb') }));
+
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 66_000;
+server.requestTimeout = 30_000;
 
 app.get('/health', (req, res) => {
   res.json({
     ok: true,
     env: isProduction ? 'production' : 'development',
-    whatsapp: cleanEnv(process.env.WA_ACCESS_TOKEN) === 'pending' ? 'simulated' : 'configured'
+    whatsapp: cleanEnv(process.env.WA_ACCESS_TOKEN) === 'pending' ? 'simulated' : 'configured',
+    uptime_seconds: Math.round(process.uptime()),
+    memory_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    db_pool: {
+      total: pool.totalCount,
+      idle: pool.idleCount,
+      waiting: pool.waitingCount
+    }
   });
 });
 
@@ -59,13 +74,14 @@ ensureOperationalSchema()
   .catch(error => console.error('❌ Error preparando esquema:', error.message));
 
 // Rutas públicas (sin token)
-app.use('/webhook', require('./src/routes/webhook'));
+app.use('/webhook', rateLimit({ windowMs: 60_000, max: 300 }), require('./src/routes/webhook'));
+app.use('/auth/login', rateLimit({ windowMs: 5 * 60_000, max: 20, message: 'Demasiados intentos de inicio de sesión' }));
 app.use('/auth', require('./src/routes/auth'));
 
 // Ruta de simulación pública (solo desarrollo)
 if (enableSimulator) {
   const messageQueue = require('./src/queues/messageQueue');
-  app.post('/simulate', async (req, res) => {
+  app.post('/simulate', rateLimit({ windowMs: 60_000, max: 120 }), async (req, res) => {
     const { phone, name, text, messageType = 'text', locationData } = req.body;
 
     if (!phone) {
@@ -109,8 +125,30 @@ app.use('/bot', authMiddleware, require('./src/routes/bot'));
 require('./src/sockets/chat')(io);
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+const listener = server.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
 });
+
+const shutdown = async (signal) => {
+  console.log(`🛑 Recibido ${signal}, cerrando servidor...`);
+  listener.close(async () => {
+    try {
+      await pool.end();
+      console.log('✅ Pool PostgreSQL cerrado');
+      process.exit(0);
+    } catch (error) {
+      console.error('❌ Error cerrando pool:', error.message);
+      process.exit(1);
+    }
+  });
+
+  setTimeout(() => {
+    console.error('❌ Cierre forzado por timeout');
+    process.exit(1);
+  }, 10_000).unref();
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 module.exports = { io };

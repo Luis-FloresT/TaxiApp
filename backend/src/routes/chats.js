@@ -4,6 +4,7 @@ const pool = require('../config/db');
 const { sendMessage, getMessages } = require('../controllers/messageController');
 const { trySendWhatsAppText } = require('../services/whatsapp');
 const { isEnabled, cleanEnv } = require('../config/env');
+const { getPagination } = require('../utils/pagination');
 
 const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '');
 const rideStatusConfig = {
@@ -141,6 +142,7 @@ const buildClientDriverConfirmation = ({ driverName, driverPhone, vehicleLabel }
 
 // Obtener todos los chats
 router.get('/', async (req, res) => {
+  const { limit, offset } = getPagination(req.query, { defaultLimit: 80, maxLimit: 150 });
   const result = await pool.query(
     `SELECT c.*,
             EXTRACT(EPOCH FROM (NOW() - c.updated_at)) / 60 as idle_minutes,
@@ -148,8 +150,13 @@ router.get('/', async (req, res) => {
              AND message_type <> 'dispatch'
              ORDER BY timestamp DESC LIMIT 1) as last_message
      FROM chats c
-     ORDER BY c.updated_at DESC`
+     ORDER BY c.updated_at DESC
+     LIMIT $1 OFFSET $2`,
+    [limit, offset]
   );
+  res.set('X-Result-Limit', String(limit));
+  res.set('X-Result-Offset', String(offset));
+  res.set('X-Has-More', result.rows.length === limit ? 'true' : 'false');
   res.json(result.rows);
 });
 

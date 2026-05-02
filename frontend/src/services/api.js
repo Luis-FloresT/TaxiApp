@@ -37,8 +37,8 @@ export const getMe = () =>
 export const changePassword = (username, currentPassword, newPassword) =>
   API.put('/auth/change-password', { username, currentPassword, newPassword });
 
-export const getChats = () => API.get('/chats');
-export const getMessages = (chatId) => API.get(`/chats/${chatId}/messages`);
+export const getChats = (params = {}) => API.get('/chats', { params });
+export const getMessages = (chatId, params = {}) => API.get(`/chats/${chatId}/messages`, { params });
 export const getChatHistory = (chatId) => API.get(`/chats/${chatId}/history`);
 export const updateRideStatus = (chatId, status) =>
   API.patch(`/chats/${chatId}/ride-status`, { status });
