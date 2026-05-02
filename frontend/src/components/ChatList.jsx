@@ -2,6 +2,16 @@ import { useEffect, useState } from 'react';
 import { getChats } from '../services/api';
 import socket from '../services/socket';
 
+const rideLabels = {
+  pending: 'Carrera pendiente',
+  dispatched: 'Taxista asignado',
+  accepted: 'Aceptada',
+  en_route: 'En camino',
+  picked_up: 'Recogido',
+  completed: 'Finalizada',
+  cancelled: 'Cancelada'
+};
+
 const ChatList = ({ onSelectChat, selectedChatId }) => {
   const [chats, setChats] = useState([]);
   const [filter, setFilter] = useState('all');
@@ -97,6 +107,10 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
           </div>
         ) : (
           visibleChats.map(chat => (
+            (() => {
+              const idleMinutes = Number(chat.idle_minutes || 0);
+              const needsAttention = chat.status === 'pending' && idleMinutes >= 5;
+              return (
             <div
               key={chat.id}
               onClick={() => onSelectChat(chat)}
@@ -121,6 +135,16 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
                   <p className="text-xs text-gray-400 truncate mt-0.5">
                     {chat.last_message || 'Sin mensajes'}
                   </p>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                      {rideLabels[chat.ride_status] || 'Carrera pendiente'}
+                    </span>
+                    {needsAttention && (
+                      <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-red-50 text-red-600">
+                        +5 min
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
               {/* Footer */}
@@ -138,6 +162,8 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
                 )}
               </div>
             </div>
+              );
+            })()
           ))
         )}
       </div>

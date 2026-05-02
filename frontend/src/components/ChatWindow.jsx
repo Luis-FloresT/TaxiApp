@@ -3,16 +3,39 @@ import {
   archiveChat,
   deleteChat,
   dispatchDriver,
+  getChatHistory,
   getDrivers,
   getMessages,
   restoreChat,
   sendMessage,
-  toggleBot
+  toggleBot,
+  updateRideStatus
 } from '../services/api';
 import socket from '../services/socket';
 import QuickReplies from './QuickReplies';
 
-const ChatWindow = ({ chat, onChatDeleted, onChatUpdated }) => {
+const rideStatuses = [
+  ['pending', 'Pendiente'],
+  ['dispatched', 'Taxista asignado'],
+  ['accepted', 'Aceptada'],
+  ['en_route', 'En camino'],
+  ['picked_up', 'Cliente recogido'],
+  ['completed', 'Finalizada'],
+  ['cancelled', 'Cancelada']
+];
+
+const rideStatusLabels = Object.fromEntries(rideStatuses);
+const rideStatusClasses = {
+  pending: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+  dispatched: 'bg-blue-100 text-blue-700 border-blue-200',
+  accepted: 'bg-green-100 text-green-700 border-green-200',
+  en_route: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+  picked_up: 'bg-purple-100 text-purple-700 border-purple-200',
+  completed: 'bg-gray-100 text-gray-700 border-gray-200',
+  cancelled: 'bg-red-100 text-red-700 border-red-200'
+};
+
+const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const [drivers, setDrivers] = useState([]);
@@ -34,7 +57,10 @@ const ChatWindow = ({ chat, onChatDeleted, onChatUpdated }) => {
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [botActive, setBotActive] = useState(chat.bot_active ?? true);
   const [isArchived, setIsArchived] = useState(chat.status === 'closed');
+  const [rideStatus, setRideStatus] = useState(chat.ride_status || 'pending');
   const [chatAction, setChatAction] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState(null);
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -79,7 +105,8 @@ const ChatWindow = ({ chat, onChatDeleted, onChatUpdated }) => {
   useEffect(() => {
     setIsArchived(chat.status === 'closed');
     setBotActive(chat.bot_active ?? true);
-  }, [chat.id, chat.status, chat.bot_active]);
+    setRideStatus(chat.ride_status || 'pending');
+  }, [chat.id, chat.status, chat.bot_active, chat.ride_status]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -177,12 +204,40 @@ const ChatWindow = ({ chat, onChatDeleted, onChatUpdated }) => {
       setDrivers(driversRes.data);
       setMessages(messagesRes.data);
       window.dispatchEvent(new Event('chats:refresh'));
-      alert('Carrera enviada al taxista por WhatsApp');
+      const delivery = res.data.whatsapp_delivery;
+      if (delivery?.driver?.ok === false || delivery?.client?.ok === false) {
+        alert('Despacho guardado. WhatsApp rechazó uno de los envíos; revisa si el número está autorizado en Meta.');
+      } else {
+        alert('Carrera enviada al taxista por WhatsApp');
+      }
     } catch (error) {
       console.error('Error despachando taxista:', error);
       alert(error.response?.data?.error || 'No se pudo despachar la carrera');
     } finally {
       setDispatching(false);
+    }
+  };
+
+  const handleRideStatus = async (nextStatus) => {
+    try {
+      const res = await updateRideStatus(chat.id, nextStatus);
+      setRideStatus(nextStatus);
+      onChatUpdated?.(res.data.chat);
+      const messagesRes = await getMessages(chat.id);
+      setMessages(messagesRes.data);
+      window.dispatchEvent(new Event('chats:refresh'));
+    } catch (error) {
+      alert(error.response?.data?.error || 'No se pudo cambiar el estado de la carrera');
+    }
+  };
+
+  const loadHistory = async () => {
+    try {
+      const res = await getChatHistory(chat.id);
+      setHistory(res.data);
+      setHistoryOpen(true);
+    } catch (error) {
+      alert(error.response?.data?.error || 'No se pudo cargar el historial');
     }
   };
 
@@ -239,6 +294,9 @@ const ChatWindow = ({ chat, onChatDeleted, onChatUpdated }) => {
   };
 
   const assignedDriverText = assignedDriver.name || (assignedDriver.phone ? `+${assignedDriver.phone}` : '');
+  const idleMinutes = Number(chat.idle_minutes || 0);
+  const needsAttention = !isArchived && chat.status === 'pending' && idleMinutes >= 5;
+  const isAdmin = agent?.role === 'admin';
 
   const isBotMessage = (content) =>
     content?.includes('TaxiWhatsApp') ||
@@ -300,6 +358,23 @@ const ChatWindow = ({ chat, onChatDeleted, onChatUpdated }) => {
           <div>
             <p className="font-semibold text-gray-800">{chat.contact_name || 'Desconocido'}</p>
             <p className="text-xs text-gray-500">+{chat.phone_number}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${rideStatusClasses[rideStatus] || rideStatusClasses.pending}`}>
+                {rideStatusLabels[rideStatus] || 'Pendiente'}
+              </span>
+              {needsAttention && (
+                <span className="inline-flex rounded-full bg-red-50 border border-red-100 px-2 py-0.5 text-xs font-medium text-red-600">
+                  Atención: +5 min pendiente
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={loadHistory}
+                className="text-xs text-green-600 hover:underline"
+              >
+                Historial
+              </button>
+            </div>
             {assignedDriver.phone && (
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 <span className="inline-flex items-center gap-1 rounded-full bg-green-50 border border-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
@@ -354,15 +429,37 @@ const ChatWindow = ({ chat, onChatDeleted, onChatUpdated }) => {
             </button>
           )}
 
-          <button
-            onClick={handleDelete}
-            disabled={chatAction === 'delete'}
-            className="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-red-600 bg-white hover:bg-red-50 disabled:opacity-50 transition-colors"
-          >
-            {chatAction === 'delete' ? 'Borrando...' : 'Borrar'}
-          </button>
+          {isAdmin && (
+            <button
+              onClick={handleDelete}
+              disabled={chatAction === 'delete'}
+              className="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-red-600 bg-white hover:bg-red-50 disabled:opacity-50 transition-colors"
+            >
+              {chatAction === 'delete' ? 'Borrando...' : 'Borrar'}
+            </button>
+          )}
         </div>
       </div>
+
+      {!isArchived && (
+        <div className="bg-white border-b border-gray-100 px-6 py-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-gray-500 mr-1">Estado de carrera:</span>
+          {rideStatuses.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => handleRideStatus(value)}
+              className={`text-xs rounded-full border px-2 py-1 transition-colors ${
+                rideStatus === value
+                  ? rideStatusClasses[value]
+                  : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {dispatchOpen && !isArchived && (
         <div className="bg-green-50 border-b border-green-100 px-6 py-4">
@@ -596,6 +693,63 @@ const ChatWindow = ({ chat, onChatDeleted, onChatUpdated }) => {
           ⚡ Respuestas rápidas &nbsp;•&nbsp; Enter para enviar &nbsp;•&nbsp; Shift+Enter nueva línea
         </p>
       </div>
+
+      {historyOpen && history && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-xl shadow-xl">
+            <div className="px-5 py-4 border-b flex items-center justify-between">
+              <div>
+                <h2 className="font-semibold text-gray-800">Historial del cliente</h2>
+                <p className="text-sm text-gray-500">{history.chat.contact_name || 'Sin nombre'} · +{history.chat.phone_number}</p>
+              </div>
+              <button onClick={() => setHistoryOpen(false)} className="text-gray-400 hover:text-gray-700 text-xl">×</button>
+            </div>
+            <div className="p-5 space-y-5">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div className="border border-gray-200 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Mensajes</p>
+                  <p className="text-xl font-bold text-gray-800">{history.stats.total_messages}</p>
+                </div>
+                <div className="border border-gray-200 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Despachos</p>
+                  <p className="text-xl font-bold text-gray-800">{history.stats.total_dispatches}</p>
+                </div>
+                <div className="border border-gray-200 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Estado actual</p>
+                  <p className="text-sm font-semibold text-gray-800">{rideStatusLabels[history.chat.ride_status] || history.chat.ride_status}</p>
+                </div>
+              </div>
+
+              <section>
+                <h3 className="font-semibold text-gray-800 mb-2">Ubicaciones recientes</h3>
+                <div className="space-y-2">
+                  {history.recent_locations.length === 0 ? (
+                    <p className="text-sm text-gray-400">Sin ubicaciones guardadas</p>
+                  ) : history.recent_locations.map(item => (
+                    <div key={item.timestamp} className="border border-gray-200 rounded-lg p-3 text-sm text-gray-600">
+                      <p className="font-medium text-gray-800">{item.location_name || 'Ubicación compartida'}</p>
+                      <p>{item.location_address || item.content}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-gray-800 mb-2">Últimos movimientos</h3>
+                <div className="space-y-2">
+                  {history.dispatches.length === 0 ? (
+                    <p className="text-sm text-gray-400">Sin movimientos todavía</p>
+                  ) : history.dispatches.map(item => (
+                    <div key={item.timestamp} className="border border-amber-200 bg-amber-50 rounded-lg p-3 text-sm text-amber-800">
+                      {item.content}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

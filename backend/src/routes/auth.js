@@ -33,7 +33,7 @@ router.post('/login', async (req, res) => {
 
     const jwtConfig = getJwtConfig();
     const token = jwt.sign(
-      { id: agent.id, name: agent.name, username: agent.username },
+      { id: agent.id, name: agent.name, username: agent.username, role: agent.role || 'operator' },
       jwtConfig.secret,
       { expiresIn: jwtConfig.expiresIn }
     );
@@ -44,7 +44,8 @@ router.post('/login', async (req, res) => {
         id: agent.id,
         name: agent.name,
         username: agent.username,
-        email: agent.email
+        email: agent.email,
+        role: agent.role || 'operator'
       }
     });
   } catch (err) {

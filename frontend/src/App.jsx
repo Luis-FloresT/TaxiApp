@@ -6,6 +6,8 @@ import Login from './components/Login';
 import Simulator from './components/Simulator';
 import BotConfig from './components/BotConfig';
 import LegalPage from './components/LegalPage';
+import DriversPanel from './components/DriversPanel';
+import ReportsPanel from './components/ReportsPanel';
 
 function App() {
   const simulatorEnabled = import.meta.env.VITE_ENABLE_SIMULATOR === 'true' || import.meta.env.DEV;
@@ -26,6 +28,8 @@ function App() {
     }
   });
   const [showBotConfig, setShowBotConfig] = useState(false);
+  const [showDrivers, setShowDrivers] = useState(false);
+  const [showReports, setShowReports] = useState(false);
 
   if (['/privacy', '/terms', '/data-deletion'].includes(path)) {
     return <LegalPage path={path} />;
@@ -63,7 +67,9 @@ function App() {
       <Header
         agent={agent}
         onLogout={handleLogout}
-        onBotConfig={() => setShowBotConfig(true)}
+        onBotConfig={agent.role === 'admin' ? () => setShowBotConfig(true) : null}
+        onDrivers={() => setShowDrivers(true)}
+        onReports={agent.role === 'admin' ? () => setShowReports(true) : null}
       />
       <div className="flex flex-1 overflow-hidden">
         <ChatList
@@ -74,6 +80,7 @@ function App() {
           <ChatWindow
             key={selectedChat.id}
             chat={selectedChat}
+            agent={agent}
             onChatDeleted={handleChatDeleted}
             onChatUpdated={handleChatUpdated}
           />
@@ -97,6 +104,12 @@ function App() {
       </div>
       {showBotConfig && (
         <BotConfig onClose={() => setShowBotConfig(false)} />
+      )}
+      {showDrivers && (
+        <DriversPanel onClose={() => setShowDrivers(false)} />
+      )}
+      {showReports && (
+        <ReportsPanel onClose={() => setShowReports(false)} />
       )}
     </div>
   );

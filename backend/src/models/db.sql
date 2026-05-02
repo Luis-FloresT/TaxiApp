@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS agents (
   username VARCHAR(80) NOT NULL UNIQUE,
   email VARCHAR(160),
   password VARCHAR(255) NOT NULL,
+  role VARCHAR(24) NOT NULL DEFAULT 'operator',
   active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -20,6 +21,13 @@ CREATE TABLE IF NOT EXISTS chats (
   assigned_driver_name VARCHAR(120),
   assigned_driver_vehicle_label VARCHAR(120),
   driver_dispatched_at TIMESTAMPTZ,
+  ride_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  related_client_chat_id INTEGER,
+  driver_accepted_at TIMESTAMPTZ,
+  driver_en_route_at TIMESTAMPTZ,
+  picked_up_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  cancelled_at TIMESTAMPTZ,
   bot_active BOOLEAN NOT NULL DEFAULT true,
   bot_step VARCHAR(80) NOT NULL DEFAULT 'welcome',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -74,6 +82,8 @@ CREATE TABLE IF NOT EXISTS driver_contacts (
   name VARCHAR(120) NOT NULL,
   phone_number VARCHAR(32) NOT NULL UNIQUE,
   vehicle_label VARCHAR(120),
+  availability_status VARCHAR(24) NOT NULL DEFAULT 'available',
+  last_assigned_at TIMESTAMPTZ,
   active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -83,6 +93,7 @@ ALTER TABLE agents ADD COLUMN IF NOT EXISTS name VARCHAR(120);
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS username VARCHAR(80);
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS email VARCHAR(160);
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS password VARCHAR(255);
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS role VARCHAR(24) NOT NULL DEFAULT 'operator';
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
@@ -95,6 +106,13 @@ ALTER TABLE chats ADD COLUMN IF NOT EXISTS assigned_driver_phone VARCHAR(32);
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS assigned_driver_name VARCHAR(120);
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS assigned_driver_vehicle_label VARCHAR(120);
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS driver_dispatched_at TIMESTAMPTZ;
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS ride_status VARCHAR(32) NOT NULL DEFAULT 'pending';
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS related_client_chat_id INTEGER;
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS driver_accepted_at TIMESTAMPTZ;
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS driver_en_route_at TIMESTAMPTZ;
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS picked_up_at TIMESTAMPTZ;
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS bot_active BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS bot_step VARCHAR(80) NOT NULL DEFAULT 'welcome';
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
@@ -133,6 +151,8 @@ ALTER TABLE bot_system_messages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ 
 ALTER TABLE driver_contacts ADD COLUMN IF NOT EXISTS name VARCHAR(120);
 ALTER TABLE driver_contacts ADD COLUMN IF NOT EXISTS phone_number VARCHAR(32);
 ALTER TABLE driver_contacts ADD COLUMN IF NOT EXISTS vehicle_label VARCHAR(120);
+ALTER TABLE driver_contacts ADD COLUMN IF NOT EXISTS availability_status VARCHAR(24) NOT NULL DEFAULT 'available';
+ALTER TABLE driver_contacts ADD COLUMN IF NOT EXISTS last_assigned_at TIMESTAMPTZ;
 ALTER TABLE driver_contacts ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE driver_contacts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 ALTER TABLE driver_contacts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
@@ -145,11 +165,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_menu_option_number_unique ON bot_menu(
 CREATE UNIQUE INDEX IF NOT EXISTS idx_driver_contacts_phone_unique ON driver_contacts(phone_number);
 
 CREATE INDEX IF NOT EXISTS idx_chats_status ON chats(status);
+CREATE INDEX IF NOT EXISTS idx_chats_ride_status ON chats(ride_status);
+CREATE INDEX IF NOT EXISTS idx_chats_assigned_driver_phone ON chats(assigned_driver_phone);
+CREATE INDEX IF NOT EXISTS idx_chats_related_client_chat ON chats(related_client_chat_id);
 CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON chats(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_timestamp ON messages(chat_id, timestamp ASC);
 CREATE INDEX IF NOT EXISTS idx_quick_replies_active_category ON quick_replies(active, category);
 CREATE INDEX IF NOT EXISTS idx_bot_menu_active_option ON bot_menu(active, option_number);
 CREATE INDEX IF NOT EXISTS idx_driver_contacts_active_name ON driver_contacts(active, name);
+CREATE INDEX IF NOT EXISTS idx_driver_contacts_availability ON driver_contacts(availability_status);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
@@ -207,6 +231,8 @@ ON CONFLICT (username) DO UPDATE SET
   email = EXCLUDED.email,
   password = EXCLUDED.password,
   active = EXCLUDED.active;
+
+UPDATE agents SET role = 'admin' WHERE username = 'operador1';
 
 INSERT INTO bot_system_messages (key, description, value)
 VALUES

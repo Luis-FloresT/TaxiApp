@@ -6,6 +6,7 @@ const cors = require('cors');
 const authMiddleware = require('./src/middlewares/auth');
 const pool = require('./src/config/db');
 const { cleanEnv, isEnabled } = require('./src/config/env');
+const { ensureOperationalSchema } = require('./src/config/migrations');
 
 const isProduction = cleanEnv(process.env.NODE_ENV) === 'production';
 const allowedOrigins = (cleanEnv(process.env.CORS_ORIGIN) || cleanEnv(process.env.FRONTEND_URL))
@@ -53,6 +54,10 @@ app.get('/health/db', async (req, res) => {
   }
 });
 
+ensureOperationalSchema()
+  .then(() => console.log('✅ Esquema operativo listo'))
+  .catch(error => console.error('❌ Error preparando esquema:', error.message));
+
 // Rutas públicas (sin token)
 app.use('/webhook', require('./src/routes/webhook'));
 app.use('/auth', require('./src/routes/auth'));
@@ -97,6 +102,7 @@ if (enableSimulator) {
 app.use('/chats', authMiddleware, require('./src/routes/chats'));
 app.use('/drivers', authMiddleware, require('./src/routes/drivers'));
 app.use('/quick-replies', authMiddleware, require('./src/routes/quickReplies'));
+app.use('/reports', authMiddleware, require('./src/routes/reports'));
 
 app.use('/bot', authMiddleware, require('./src/routes/bot'));
 

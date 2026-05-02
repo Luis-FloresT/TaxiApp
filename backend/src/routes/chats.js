@@ -6,20 +6,33 @@ const { trySendWhatsAppText } = require('../services/whatsapp');
 const { isEnabled, cleanEnv } = require('../config/env');
 
 const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '');
+const rideStatusConfig = {
+  pending: { label: 'Pendiente', timestampColumn: null },
+  dispatched: { label: 'Taxista asignado', timestampColumn: 'driver_dispatched_at' },
+  accepted: { label: 'Aceptada por taxista', timestampColumn: 'driver_accepted_at' },
+  en_route: { label: 'En camino', timestampColumn: 'driver_en_route_at' },
+  picked_up: { label: 'Cliente recogido', timestampColumn: 'picked_up_at' },
+  completed: { label: 'Finalizada', timestampColumn: 'completed_at' },
+  cancelled: { label: 'Cancelada', timestampColumn: 'cancelled_at' }
+};
+
+const allowedRideStatuses = Object.keys(rideStatusConfig);
 
 const upsertDriverChat = async ({ driverPhone, driverName, vehicleLabel, dispatchText, sourceChat }) => {
   const fallbackName = driverName || `Taxista +${driverPhone}`;
   const driverChatResult = await pool.query(
-    `INSERT INTO chats (phone_number, contact_name, status, bot_active, bot_step)
-     VALUES ($1, $2, 'active', false, 'agent')
+    `INSERT INTO chats (phone_number, contact_name, status, bot_active, bot_step, related_client_chat_id, ride_status)
+     VALUES ($1, $2, 'active', false, 'agent', $3, 'dispatched')
      ON CONFLICT (phone_number) DO UPDATE SET
        contact_name = COALESCE(NULLIF(EXCLUDED.contact_name, ''), chats.contact_name),
        status = 'active',
        bot_active = false,
        bot_step = 'agent',
+       related_client_chat_id = EXCLUDED.related_client_chat_id,
+       ride_status = 'dispatched',
        updated_at = NOW()
      RETURNING id`,
-    [driverPhone, fallbackName]
+    [driverPhone, fallbackName, sourceChat.id]
   );
 
   const label = driverName || `+${driverPhone}`;
@@ -40,6 +53,39 @@ const upsertDriverChat = async ({ driverPhone, driverName, vehicleLabel, dispatc
   );
 
   return driverChatResult.rows[0].id;
+};
+
+const addRideNote = async (chatId, content) => {
+  await pool.query(
+    `INSERT INTO messages (chat_id, content, from_agent, message_type)
+     VALUES ($1, $2, true, 'dispatch')`,
+    [chatId, content]
+  );
+};
+
+const updateRideStatus = async (chatId, nextStatus) => {
+  if (!allowedRideStatuses.includes(nextStatus)) {
+    throw new Error('Estado de carrera inválido');
+  }
+
+  const config = rideStatusConfig[nextStatus];
+  const timestampSet = config.timestampColumn ? `, ${config.timestampColumn} = NOW()` : '';
+  const result = await pool.query(
+    `UPDATE chats
+     SET ride_status = $1,
+         status = CASE WHEN $1 IN ('completed', 'cancelled') THEN status ELSE 'active' END,
+         updated_at = NOW()
+         ${timestampSet}
+     WHERE id = $2
+     RETURNING *`,
+    [nextStatus, chatId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error('Chat no encontrado');
+  }
+
+  return result.rows[0];
 };
 
 const buildDispatchMessage = ({ chat, lastClientMessage, lastLocationMessage, notes, driverName }) => {
@@ -97,6 +143,7 @@ const buildClientDriverConfirmation = ({ driverName, driverPhone, vehicleLabel }
 router.get('/', async (req, res) => {
   const result = await pool.query(
     `SELECT c.*,
+            EXTRACT(EPOCH FROM (NOW() - c.updated_at)) / 60 as idle_minutes,
             (SELECT content FROM messages WHERE chat_id = c.id
              AND message_type <> 'dispatch'
              ORDER BY timestamp DESC LIMIT 1) as last_message
@@ -108,6 +155,94 @@ router.get('/', async (req, res) => {
 
 // Obtener mensajes de un chat
 router.get('/:chatId/messages', getMessages);
+
+router.get('/:chatId/history', async (req, res) => {
+  const { chatId } = req.params;
+
+  try {
+    const chatResult = await pool.query(
+      `SELECT id, phone_number, contact_name, assigned_driver_name, assigned_driver_phone,
+              assigned_driver_vehicle_label, ride_status, driver_dispatched_at,
+              driver_accepted_at, completed_at, cancelled_at
+       FROM chats
+       WHERE id = $1`,
+      [chatId]
+    );
+
+    if (chatResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Chat no encontrado' });
+    }
+
+    const chat = chatResult.rows[0];
+    const [statsResult, locationsResult, dispatchesResult] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*)::int as total_messages,
+                COUNT(*) FILTER (WHERE message_type = 'dispatch')::int as total_dispatches,
+                MIN(timestamp) as first_message_at,
+                MAX(timestamp) as last_message_at
+         FROM messages
+         WHERE chat_id = $1`,
+        [chatId]
+      ),
+      pool.query(
+        `SELECT content, location_lat, location_lng, location_name, location_address, timestamp
+         FROM messages
+         WHERE chat_id = $1 AND (message_type = 'location' OR location_lat IS NOT NULL)
+         ORDER BY timestamp DESC
+         LIMIT 3`,
+        [chatId]
+      ),
+      pool.query(
+        `SELECT content, timestamp
+         FROM messages
+         WHERE chat_id = $1 AND message_type IN ('dispatch', 'driver_dispatch')
+         ORDER BY timestamp DESC
+         LIMIT 5`,
+        [chatId]
+      )
+    ]);
+
+    res.json({
+      chat,
+      stats: statsResult.rows[0],
+      recent_locations: locationsResult.rows,
+      dispatches: dispatchesResult.rows
+    });
+  } catch (error) {
+    console.error('❌ Error obteniendo historial:', error.message);
+    res.status(500).json({ error: 'No se pudo cargar el historial' });
+  }
+});
+
+router.patch('/:chatId/ride-status', async (req, res) => {
+  const { chatId } = req.params;
+  const { status: nextStatus } = req.body;
+
+  try {
+    const chat = await updateRideStatus(chatId, nextStatus);
+    const statusLabel = rideStatusConfig[nextStatus].label;
+    await addRideNote(chatId, `Estado de carrera actualizado: ${statusLabel}`);
+
+    if (nextStatus === 'completed' && chat.assigned_driver_phone) {
+      await pool.query(
+        `UPDATE driver_contacts
+         SET availability_status = 'available', updated_at = NOW()
+         WHERE phone_number = $1`,
+        [chat.assigned_driver_phone]
+      );
+    }
+
+    const { io } = require('../../index');
+    io.emit('chat_updated', { chatId: Number(chatId), ride_status: nextStatus, status: chat.status });
+    io.emit('message_sent', { chatId: Number(chatId), text: statusLabel, fromAgent: true });
+
+    res.json({ success: true, chat });
+  } catch (error) {
+    console.error('❌ Error actualizando estado:', error.message);
+    const code = error.message.includes('inválido') ? 400 : 500;
+    res.status(code).json({ error: error.message || 'No se pudo actualizar el estado' });
+  }
+});
 
 // Archivar chat sin borrar historial
 router.patch('/:chatId/archive', async (req, res) => {
@@ -166,6 +301,10 @@ router.patch('/:chatId/restore', async (req, res) => {
 // Borrar chat y sus mensajes
 router.delete('/:chatId', async (req, res) => {
   const { chatId } = req.params;
+
+  if (req.agent?.role !== 'admin') {
+    return res.status(403).json({ error: 'Solo un administrador puede borrar chats' });
+  }
 
   try {
     const result = await pool.query(
@@ -292,6 +431,7 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
     await pool.query(
       `UPDATE chats
        SET status = 'active',
+           ride_status = 'dispatched',
            assigned_driver_phone = $1,
            assigned_driver_name = NULLIF($2, ''),
            assigned_driver_vehicle_label = NULLIF($3, ''),
@@ -299,6 +439,15 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
            updated_at = NOW()
        WHERE id = $4`,
       [normalizedDriverPhone, selectedDriverName, selectedVehicleLabel, chatId]
+    );
+
+    await pool.query(
+      `UPDATE driver_contacts
+       SET availability_status = 'busy',
+           last_assigned_at = NOW(),
+           updated_at = NOW()
+       WHERE phone_number = $1`,
+      [normalizedDriverPhone]
     );
 
     const driverLabel = selectedDriverName || `+${normalizedDriverPhone}`;

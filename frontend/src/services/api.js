@@ -39,6 +39,9 @@ export const changePassword = (username, currentPassword, newPassword) =>
 
 export const getChats = () => API.get('/chats');
 export const getMessages = (chatId) => API.get(`/chats/${chatId}/messages`);
+export const getChatHistory = (chatId) => API.get(`/chats/${chatId}/history`);
+export const updateRideStatus = (chatId, status) =>
+  API.patch(`/chats/${chatId}/ride-status`, { status });
 export const archiveChat = (chatId) => API.patch(`/chats/${chatId}/archive`);
 export const restoreChat = (chatId) => API.patch(`/chats/${chatId}/restore`);
 export const deleteChat = (chatId) => API.delete(`/chats/${chatId}`);
@@ -48,6 +51,9 @@ export const dispatchDriver = (chatId, payload) =>
   API.post(`/chats/${chatId}/dispatch-driver`, payload);
 export const getDrivers = () => API.get('/drivers');
 export const createDriver = (data) => API.post('/drivers', data);
+export const updateDriver = (id, data) => API.patch(`/drivers/${id}`, data);
+export const deleteDriver = (id) => API.delete(`/drivers/${id}`);
+export const getReportSummary = () => API.get('/reports/summary');
 export const getQuickReplies = () => API.get('/quick-replies');
 export const toggleBot = (chatId, active) =>
   API.post(`/chats/${chatId}/bot`, { active });
