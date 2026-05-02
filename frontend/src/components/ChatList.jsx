@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { bulkDeleteCustomerChats, getChats } from '../services/api';
+import { getChats } from '../services/api';
 import socket from '../services/socket';
 
 const rideLabels = {
@@ -12,14 +12,11 @@ const rideLabels = {
   cancelled: 'Cancelada'
 };
 
-const ChatList = ({ onSelectChat, selectedChatId, agent, onBulkDeleted }) => {
+const ChatList = ({ onSelectChat, selectedChatId }) => {
   const [chats, setChats] = useState([]);
   const [filter, setFilter] = useState('all');
   const [hasMore, setHasMore] = useState(false);
-  const [includeOpenRides, setIncludeOpenRides] = useState(false);
-  const [cleanupPeriod, setCleanupPeriod] = useState('');
   const pageSize = 80;
-  const isAdmin = agent?.role === 'admin';
 
   useEffect(() => {
     let active = true;
@@ -74,29 +71,6 @@ const ChatList = ({ onSelectChat, selectedChatId, agent, onBulkDeleted }) => {
     return 'Archivado';
   };
 
-  const handleBulkDelete = async (period) => {
-    const label = period === 'today' ? 'hoy' : 'los últimos 7 días';
-    const activeText = includeOpenRides
-      ? 'También se borrarán clientes pendientes y carreras activas.'
-      : 'Solo se borrarán clientes finalizados o cancelados.';
-    const ok = confirm(
-      `¿Borrar chats de clientes de ${label}?\n\n${activeText}\n\nLos chats de taxistas no se borrarán.`
-    );
-
-    if (!ok) return;
-
-    setCleanupPeriod(period);
-    try {
-      const res = await bulkDeleteCustomerChats(period, includeOpenRides);
-      onBulkDeleted?.();
-      alert(`Limpieza completada. Chats borrados: ${res.data.deleted_count}`);
-    } catch (error) {
-      alert(error.response?.data?.error || 'No se pudieron borrar los chats');
-    } finally {
-      setCleanupPeriod('');
-    }
-  };
-
   return (
     <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
       {/* Header lista */}
@@ -128,39 +102,6 @@ const ChatList = ({ onSelectChat, selectedChatId, agent, onBulkDeleted }) => {
             </button>
           ))}
         </div>
-        {isAdmin && (
-          <div className="mt-3 rounded-lg border border-red-100 bg-white p-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium text-red-600">Limpieza</span>
-              <label className="flex items-center gap-1 text-[11px] text-gray-500">
-                <input
-                  type="checkbox"
-                  checked={includeOpenRides}
-                  onChange={e => setIncludeOpenRides(e.target.checked)}
-                />
-                incluir pendientes/activas
-              </label>
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleBulkDelete('today')}
-                disabled={Boolean(cleanupPeriod)}
-                className="rounded-md border border-red-200 px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-              >
-                {cleanupPeriod === 'today' ? 'Borrando...' : 'Borrar hoy'}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleBulkDelete('week')}
-                disabled={Boolean(cleanupPeriod)}
-                className="rounded-md border border-red-200 px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-              >
-                {cleanupPeriod === 'week' ? 'Borrando...' : 'Borrar 7 días'}
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Lista de chats */}

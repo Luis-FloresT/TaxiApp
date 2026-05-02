@@ -8,6 +8,7 @@ import BotConfig from './components/BotConfig';
 import LegalPage from './components/LegalPage';
 import DriversPanel from './components/DriversPanel';
 import ReportsPanel from './components/ReportsPanel';
+import MaintenancePanel from './components/MaintenancePanel';
 
 function App() {
   const simulatorEnabled = import.meta.env.VITE_ENABLE_SIMULATOR === 'true' || import.meta.env.DEV;
@@ -30,6 +31,7 @@ function App() {
   const [showBotConfig, setShowBotConfig] = useState(false);
   const [showDrivers, setShowDrivers] = useState(false);
   const [showReports, setShowReports] = useState(false);
+  const [showMaintenance, setShowMaintenance] = useState(false);
 
   if (['/privacy', '/terms', '/data-deletion'].includes(path)) {
     return <LegalPage path={path} />;
@@ -75,13 +77,12 @@ function App() {
         onBotConfig={agent.role === 'admin' ? () => setShowBotConfig(true) : null}
         onDrivers={() => setShowDrivers(true)}
         onReports={agent.role === 'admin' ? () => setShowReports(true) : null}
+        onMaintenance={agent.role === 'admin' ? () => setShowMaintenance(true) : null}
       />
       <div className="flex flex-1 overflow-hidden">
         <ChatList
           onSelectChat={setSelectedChat}
           selectedChatId={selectedChat?.id}
-          agent={agent}
-          onBulkDeleted={handleBulkChatsDeleted}
         />
         {selectedChat ? (
           <ChatWindow
@@ -117,6 +118,12 @@ function App() {
       )}
       {showReports && (
         <ReportsPanel onClose={() => setShowReports(false)} />
+      )}
+      {showMaintenance && (
+        <MaintenancePanel
+          onClose={() => setShowMaintenance(false)}
+          onBulkDeleted={handleBulkChatsDeleted}
+        />
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-const Header = ({ agent, onLogout, onBotConfig, onDrivers, onReports }) => {
+const Header = ({ agent, onLogout, onBotConfig, onDrivers, onReports, onMaintenance }) => {
   return (
     <div className="bg-green-600 text-white px-6 py-4 flex items-center gap-3 shadow-md">
       <div className="text-2xl">🚖</div>
@@ -35,6 +35,15 @@ const Header = ({ agent, onLogout, onBotConfig, onDrivers, onReports }) => {
             className="flex items-center gap-2 bg-green-700 hover:bg-green-800 px-3 py-1.5 rounded-lg text-sm transition-colors"
           >
             📊 Reportes
+          </button>
+        )}
+
+        {onMaintenance && (
+          <button
+            onClick={onMaintenance}
+            className="flex items-center gap-2 bg-green-700 hover:bg-green-800 px-3 py-1.5 rounded-lg text-sm transition-colors"
+          >
+            🧹 Mantenimiento
           </button>
         )}
 
