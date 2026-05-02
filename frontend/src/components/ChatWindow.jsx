@@ -123,7 +123,8 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
       setMessages(res.data);
     } catch (error) {
       console.error('Error enviando mensaje:', error);
-      alert('Error enviando mensaje');
+      const detail = error.response?.data?.detail || error.response?.data?.error || 'Error enviando mensaje';
+      alert(detail);
     } finally {
       setSending(false);
     }

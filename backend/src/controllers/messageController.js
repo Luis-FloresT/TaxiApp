@@ -27,8 +27,15 @@ const sendMessage = async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    console.error('❌ Error:', error.message);
-    res.status(500).json({ error: 'Error enviando mensaje' });
+    const metaError = error.response?.data?.error;
+    const detail = metaError?.message || error.message;
+    console.error('❌ Error enviando mensaje:', detail);
+    res.status(502).json({
+      error: 'Meta no aceptó el envío de WhatsApp',
+      detail,
+      code: metaError?.code || null,
+      subcode: metaError?.error_subcode || null
+    });
   }
 };
 
