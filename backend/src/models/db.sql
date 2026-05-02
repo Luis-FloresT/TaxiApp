@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS chats (
   assigned_driver_vehicle_label VARCHAR(120),
   driver_dispatched_at TIMESTAMPTZ,
   ride_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  contact_type VARCHAR(24) NOT NULL DEFAULT 'customer',
   related_client_chat_id INTEGER,
   driver_accepted_at TIMESTAMPTZ,
   driver_en_route_at TIMESTAMPTZ,
@@ -107,6 +108,7 @@ ALTER TABLE chats ADD COLUMN IF NOT EXISTS assigned_driver_name VARCHAR(120);
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS assigned_driver_vehicle_label VARCHAR(120);
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS driver_dispatched_at TIMESTAMPTZ;
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS ride_status VARCHAR(32) NOT NULL DEFAULT 'pending';
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS contact_type VARCHAR(24) NOT NULL DEFAULT 'customer';
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS related_client_chat_id INTEGER;
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS driver_accepted_at TIMESTAMPTZ;
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS driver_en_route_at TIMESTAMPTZ;
@@ -166,6 +168,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_driver_contacts_phone_unique ON driver_con
 
 CREATE INDEX IF NOT EXISTS idx_chats_status ON chats(status);
 CREATE INDEX IF NOT EXISTS idx_chats_ride_status ON chats(ride_status);
+CREATE INDEX IF NOT EXISTS idx_chats_contact_type ON chats(contact_type);
 CREATE INDEX IF NOT EXISTS idx_chats_assigned_driver_phone ON chats(assigned_driver_phone);
 CREATE INDEX IF NOT EXISTS idx_chats_related_client_chat ON chats(related_client_chat_id);
 CREATE INDEX IF NOT EXISTS idx_chats_open_updated_at ON chats(updated_at DESC) WHERE status <> 'closed';
@@ -236,6 +239,16 @@ ON CONFLICT (username) DO UPDATE SET
   active = EXCLUDED.active;
 
 UPDATE agents SET role = 'admin' WHERE username = 'operador1';
+
+UPDATE chats
+SET contact_type = 'driver',
+    bot_active = false,
+    bot_step = 'driver'
+WHERE contact_type <> 'driver'
+  AND (
+    related_client_chat_id IS NOT NULL
+    OR phone_number IN (SELECT phone_number FROM driver_contacts WHERE active = true)
+  );
 
 INSERT INTO bot_system_messages (key, description, value)
 VALUES

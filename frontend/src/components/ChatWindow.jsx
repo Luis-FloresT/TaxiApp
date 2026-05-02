@@ -295,7 +295,8 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
 
   const assignedDriverText = assignedDriver.name || (assignedDriver.phone ? `+${assignedDriver.phone}` : '');
   const idleMinutes = Number(chat.idle_minutes || 0);
-  const needsAttention = !isArchived && chat.status === 'pending' && idleMinutes >= 5;
+  const isDriverChat = chat.contact_type === 'driver';
+  const needsAttention = !isDriverChat && !isArchived && chat.status === 'pending' && idleMinutes >= 5;
   const isAdmin = agent?.role === 'admin';
 
   const isBotMessage = (content) =>
@@ -359,9 +360,15 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
             <p className="font-semibold text-gray-800">{chat.contact_name || 'Desconocido'}</p>
             <p className="text-xs text-gray-500">+{chat.phone_number}</p>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${rideStatusClasses[rideStatus] || rideStatusClasses.pending}`}>
-                {rideStatusLabels[rideStatus] || 'Pendiente'}
-              </span>
+              {isDriverChat ? (
+                <span className="inline-flex rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                  Taxista
+                </span>
+              ) : (
+                <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${rideStatusClasses[rideStatus] || rideStatusClasses.pending}`}>
+                  {rideStatusLabels[rideStatus] || 'Pendiente'}
+                </span>
+              )}
               {needsAttention && (
                 <span className="inline-flex rounded-full bg-red-50 border border-red-100 px-2 py-0.5 text-xs font-medium text-red-600">
                   Atención: +5 min pendiente
@@ -375,7 +382,7 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
                 Historial
               </button>
             </div>
-            {assignedDriver.phone && (
+            {!isDriverChat && assignedDriver.phone && (
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 <span className="inline-flex items-center gap-1 rounded-full bg-green-50 border border-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
                   🚕 Enviado a {assignedDriverText}
@@ -391,25 +398,29 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleToggleBot}
-            disabled={isArchived}
-            className={"flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors " + (botActive
-              ? 'bg-blue-50 border-blue-300 text-blue-600 hover:bg-blue-100 disabled:opacity-50'
-              : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100 disabled:opacity-50')}
-          >
-            {"🤖 " + (botActive ? 'Bot activo' : 'Bot inactivo')}
-          </button>
+          {!isDriverChat && (
+            <>
+              <button
+                onClick={handleToggleBot}
+                disabled={isArchived}
+                className={"flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors " + (botActive
+                  ? 'bg-blue-50 border-blue-300 text-blue-600 hover:bg-blue-100 disabled:opacity-50'
+                  : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100 disabled:opacity-50')}
+              >
+                {"🤖 " + (botActive ? 'Bot activo' : 'Bot inactivo')}
+              </button>
 
-          <button
-            onClick={() => setDispatchOpen(!dispatchOpen)}
-            disabled={isArchived}
-            className={"text-sm px-3 py-1.5 rounded-lg border transition-colors " + (dispatchOpen
-              ? 'bg-green-500 text-white border-green-500'
-              : 'bg-white text-green-600 border-green-300 hover:bg-green-50 disabled:opacity-50')}
-          >
-            🚕 Despachar taxista
-          </button>
+              <button
+                onClick={() => setDispatchOpen(!dispatchOpen)}
+                disabled={isArchived}
+                className={"text-sm px-3 py-1.5 rounded-lg border transition-colors " + (dispatchOpen
+                  ? 'bg-green-500 text-white border-green-500'
+                  : 'bg-white text-green-600 border-green-300 hover:bg-green-50 disabled:opacity-50')}
+              >
+                🚕 Despachar taxista
+              </button>
+            </>
+          )}
 
           {isArchived ? (
             <button
@@ -441,7 +452,7 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
         </div>
       </div>
 
-      {!isArchived && (
+      {!isDriverChat && !isArchived && (
         <div className="bg-white border-b border-gray-100 px-6 py-2 flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-gray-500 mr-1">Estado de carrera:</span>
           {rideStatuses.map(([value, label]) => (
@@ -461,7 +472,7 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
         </div>
       )}
 
-      {dispatchOpen && !isArchived && (
+      {dispatchOpen && !isDriverChat && !isArchived && (
         <div className="bg-green-50 border-b border-green-100 px-6 py-4">
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
             <div className="lg:col-span-2">
@@ -558,7 +569,13 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
         </div>
       )}
 
-      {botActive && !isArchived && (
+      {isDriverChat && !isArchived && (
+        <div className="bg-blue-50 border-b border-blue-100 px-6 py-2 text-sm text-blue-700">
+          Este chat pertenece a un taxista. Sus mensajes no activan el bot de clientes.
+        </div>
+      )}
+
+      {!isDriverChat && botActive && !isArchived && (
         <div className="bg-blue-50 border-b border-blue-100 px-6 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2 text-blue-600 text-sm">
             <span className="animate-pulse">🤖</span>
@@ -641,7 +658,7 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
       </div>
 
       <div className="bg-white border-t border-gray-200 p-4">
-        {botActive && !isArchived && (
+        {!isDriverChat && botActive && !isArchived && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-2 mb-3">
             <p className="text-xs text-yellow-700">
               ⚠️ El bot está activo. Si escribes, tomarás control automáticamente.
@@ -670,7 +687,7 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
               value={text}
               onChange={e => {
                 setText(e.target.value);
-                if (botActive && e.target.value.length === 1) {
+                if (!isDriverChat && botActive && e.target.value.length === 1) {
                   void handleToggleBot();
                 }
               }}
@@ -699,7 +716,9 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
           <div className="bg-white w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-xl shadow-xl">
             <div className="px-5 py-4 border-b flex items-center justify-between">
               <div>
-                <h2 className="font-semibold text-gray-800">Historial del cliente</h2>
+                <h2 className="font-semibold text-gray-800">
+                  {isDriverChat ? 'Historial del taxista' : 'Historial del cliente'}
+                </h2>
                 <p className="text-sm text-gray-500">{history.chat.contact_name || 'Sin nombre'} · +{history.chat.phone_number}</p>
               </div>
               <button onClick={() => setHistoryOpen(false)} className="text-gray-400 hover:text-gray-700 text-xl">×</button>

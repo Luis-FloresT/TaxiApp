@@ -53,9 +53,10 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
   const openChats = chats.filter(chat => chat.status !== 'closed');
   const visibleChats = chats.filter(chat => {
     if (filter === 'archived') return chat.status === 'closed';
-    if (filter === 'pending') return chat.status === 'pending';
-    if (filter === 'active') return chat.status === 'active';
-    return chat.status !== 'closed';
+    if (filter === 'drivers') return chat.contact_type === 'driver' && chat.status !== 'closed';
+    if (filter === 'pending') return chat.status === 'pending' && chat.contact_type !== 'driver';
+    if (filter === 'active') return chat.status === 'active' && chat.contact_type !== 'driver';
+    return chat.status !== 'closed' && chat.contact_type !== 'driver';
   });
 
   const getStatusColor = (status) => {
@@ -86,6 +87,7 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
             ['all', 'Todos'],
             ['pending', 'Pendientes'],
             ['active', 'Activos'],
+            ['drivers', 'Taxistas'],
             ['archived', 'Archivados']
           ].map(([value, label]) => (
             <button
@@ -113,7 +115,8 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
           visibleChats.map(chat => (
             (() => {
               const idleMinutes = Number(chat.idle_minutes || 0);
-              const needsAttention = chat.status === 'pending' && idleMinutes >= 5;
+              const isDriver = chat.contact_type === 'driver';
+              const needsAttention = !isDriver && chat.status === 'pending' && idleMinutes >= 5;
               return (
             <div
               key={chat.id}
@@ -140,9 +143,15 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
                     {chat.last_message || 'Sin mensajes'}
                   </p>
                   <div className="mt-1 flex flex-wrap gap-1">
-                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                      {rideLabels[chat.ride_status] || 'Carrera pendiente'}
-                    </span>
+                    {isDriver ? (
+                      <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">
+                        Taxista
+                      </span>
+                    ) : (
+                      <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                        {rideLabels[chat.ride_status] || 'Carrera pendiente'}
+                      </span>
+                    )}
                     {needsAttention && (
                       <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-red-50 text-red-600">
                         +5 min
@@ -156,7 +165,7 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
                 <span className={`text-xs px-2 py-0.5 rounded-full text-white ${getStatusColor(chat.status)}`}>
                   {getStatusLabel(chat.status)}
                 </span>
-                {chat.assigned_driver_phone && (
+                {!isDriver && chat.assigned_driver_phone && (
                   <span
                     className="text-xs text-green-700 font-medium truncate max-w-[9rem]"
                     title={`${chat.assigned_driver_name || `+${chat.assigned_driver_phone}`}${chat.assigned_driver_vehicle_label ? ` · ${chat.assigned_driver_vehicle_label}` : ''}`}

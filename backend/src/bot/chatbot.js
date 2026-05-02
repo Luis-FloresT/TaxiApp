@@ -24,6 +24,7 @@ const processMessage = async (chatId, messageText) => {
     );
     const chat = chatResult.rows[0];
 
+    if (chat?.contact_type === 'driver') return null;
     if (!chat.bot_active) return null;
 
     const text = messageText.trim().toLowerCase();

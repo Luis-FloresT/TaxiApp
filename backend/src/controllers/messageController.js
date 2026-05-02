@@ -13,7 +13,10 @@ const sendMessage = async (req, res) => {
       [chatId, text]
     );
     await pool.query(
-      `UPDATE chats SET bot_active = false, bot_step = 'agent', updated_at = NOW()
+      `UPDATE chats
+       SET bot_active = false,
+           bot_step = CASE WHEN contact_type = 'driver' THEN 'driver' ELSE 'agent' END,
+           updated_at = NOW()
        WHERE id = $1`,
       [chatId]
     );

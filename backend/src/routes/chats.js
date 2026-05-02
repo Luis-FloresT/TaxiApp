@@ -22,13 +22,14 @@ const allowedRideStatuses = Object.keys(rideStatusConfig);
 const upsertDriverChat = async ({ driverPhone, driverName, vehicleLabel, dispatchText, sourceChat }) => {
   const fallbackName = driverName || `Taxista +${driverPhone}`;
   const driverChatResult = await pool.query(
-    `INSERT INTO chats (phone_number, contact_name, status, bot_active, bot_step, related_client_chat_id, ride_status)
-     VALUES ($1, $2, 'active', false, 'agent', $3, 'dispatched')
+    `INSERT INTO chats (phone_number, contact_name, status, bot_active, bot_step, contact_type, related_client_chat_id, ride_status)
+     VALUES ($1, $2, 'active', false, 'driver', 'driver', $3, 'dispatched')
      ON CONFLICT (phone_number) DO UPDATE SET
        contact_name = COALESCE(NULLIF(EXCLUDED.contact_name, ''), chats.contact_name),
        status = 'active',
        bot_active = false,
-       bot_step = 'agent',
+       bot_step = 'driver',
+       contact_type = 'driver',
        related_client_chat_id = EXCLUDED.related_client_chat_id,
        ride_status = 'dispatched',
        updated_at = NOW()
@@ -370,7 +371,7 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
     }
 
     const chatResult = await pool.query(
-      `SELECT id, contact_name, phone_number
+      `SELECT id, contact_name, phone_number, contact_type
        FROM chats
        WHERE id = $1`,
       [chatId]
@@ -381,6 +382,14 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
     }
 
     const chat = chatResult.rows[0];
+
+    if (chat.contact_type === 'driver') {
+      return res.status(400).json({ error: 'Este chat pertenece a un taxista. Selecciona un chat de cliente para despachar.' });
+    }
+
+    if (normalizedDriverPhone === chat.phone_number) {
+      return res.status(400).json({ error: 'El número del taxista no puede ser el mismo número del cliente' });
+    }
 
     const [lastClientMessageResult, lastLocationMessageResult] = await Promise.all([
       pool.query(
@@ -524,6 +533,19 @@ router.post('/:chatId/bot', async (req, res) => {
   const { chatId } = req.params;
   const { active } = req.body;
   const { reactivateBot, deactivateBot } = require('../bot/chatbot');
+
+  const chatResult = await pool.query(
+    'SELECT contact_type FROM chats WHERE id = $1',
+    [chatId]
+  );
+
+  if (chatResult.rows.length === 0) {
+    return res.status(404).json({ error: 'Chat no encontrado' });
+  }
+
+  if (chatResult.rows[0].contact_type === 'driver' && active) {
+    return res.status(400).json({ error: 'El bot de clientes no se puede activar en chats de taxistas' });
+  }
 
   if (active) {
     await reactivateBot(chatId);
