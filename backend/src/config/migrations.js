@@ -43,6 +43,13 @@ const ensureOperationalSchema = async () => {
         bot_step = 'driver',
         status = CASE WHEN status = 'closed' THEN status ELSE 'active' END
     WHERE contact_type = 'driver';
+
+    UPDATE chats
+    SET ride_status = 'dispatched',
+        status = CASE WHEN status = 'closed' THEN status ELSE 'active' END
+    WHERE contact_type = 'customer'
+      AND assigned_driver_phone IS NOT NULL
+      AND ride_status = 'pending';
   `);
 };
 

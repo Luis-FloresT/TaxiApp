@@ -257,6 +257,13 @@ SET bot_active = false,
     status = CASE WHEN status = 'closed' THEN status ELSE 'active' END
 WHERE contact_type = 'driver';
 
+UPDATE chats
+SET ride_status = 'dispatched',
+    status = CASE WHEN status = 'closed' THEN status ELSE 'active' END
+WHERE contact_type = 'customer'
+  AND assigned_driver_phone IS NOT NULL
+  AND ride_status = 'pending';
+
 INSERT INTO bot_system_messages (key, description, value)
 VALUES
   (
