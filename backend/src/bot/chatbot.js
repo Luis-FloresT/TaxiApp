@@ -17,6 +17,51 @@ const AGENT_KEYWORDS = [
   'asesor', 'ayuda', 'help', 'soporte'
 ];
 
+const UNKNOWN_NAMES = ['desconocido', 'unknown'];
+
+const hasKnownCustomerName = (chat) => {
+  const name = String(chat?.contact_name || '').trim();
+  if (!name) return false;
+  if (UNKNOWN_NAMES.includes(name.toLowerCase())) return false;
+  if (/^cliente\s+\+?\d+$/i.test(name)) return false;
+  return true;
+};
+
+const normalizeCustomerName = (value) =>
+  String(value || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+
+const requestCustomerName = async (chatId) => {
+  await pool.query(
+    `UPDATE chats
+     SET bot_active = true,
+         bot_step = 'awaiting_name',
+         status = 'pending',
+         updated_at = NOW()
+     WHERE id = $1`,
+    [chatId]
+  );
+};
+
+const finishRideRequest = async (chatId) => {
+  await deactivateBot(chatId);
+  return await getSystemMessage('name_saved') ||
+    'Gracias. Un operador confirmará su taxi en breve.';
+};
+
+const confirmRideOrAskName = async (chatId, chat, messageKey, fallback) => {
+  const baseMessage = await getSystemMessage(messageKey) || fallback;
+
+  if (hasKnownCustomerName(chat)) {
+    await deactivateBot(chatId);
+    return baseMessage;
+  }
+
+  await requestCustomerName(chatId);
+  const nameRequest = await getSystemMessage('name_request') ||
+    '¿A nombre de quién solicita el taxi?';
+  return `${baseMessage}\n\n${nameRequest}`;
+};
+
 const processMessage = async (chatId, messageText) => {
   try {
     const chatResult = await pool.query(
@@ -31,9 +76,12 @@ const processMessage = async (chatId, messageText) => {
     const isLocation = messageText.startsWith('📍 Ubicación compartida:');
 
     if (isLocation) {
-      await deactivateBot(chatId);
-      return await getSystemMessage('location_received') ||
-        'Ubicación recibida. Un operador confirmará su taxi en breve.';
+      return await confirmRideOrAskName(
+        chatId,
+        chat,
+        'location_received',
+        'Ubicación recibida. Un operador confirmará su taxi en breve.'
+      );
     }
 
     // Verificar palabras clave de agente
@@ -96,11 +144,34 @@ const processMessage = async (chatId, messageText) => {
       return await getSystemMessage('welcome');
     }
 
+    if (chat.bot_step === 'awaiting_name') {
+      const customerName = normalizeCustomerName(messageText);
+
+      if (customerName.length < 2 || /^\d+$/.test(customerName)) {
+        return await getSystemMessage('name_request') ||
+          '¿A nombre de quién solicita el taxi?';
+      }
+
+      await pool.query(
+        `UPDATE chats
+         SET contact_name = $1,
+             manual_contact = true,
+             updated_at = NOW()
+         WHERE id = $2 AND contact_type = 'customer'`,
+        [customerName, chatId]
+      );
+
+      return await finishRideRequest(chatId);
+    }
+
     // Respuesta según el paso actual
     if (chat.bot_step === 'option_1') {
-      await deactivateBot(chatId);
-      return await getSystemMessage('address_received') ||
-        '✅ Dirección recibida. Un operador confirmará su taxi en breve.';
+      return await confirmRideOrAskName(
+        chatId,
+        chat,
+        'address_received',
+        'Dirección recibida. Un operador confirmará su taxi en breve.'
+      );
     }
 
     if (chat.bot_step === 'option_2') {

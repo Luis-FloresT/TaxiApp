@@ -8,6 +8,7 @@ const rateLimit = require('./src/middlewares/rateLimit');
 const pool = require('./src/config/db');
 const { cleanEnv, isEnabled } = require('./src/config/env');
 const { ensureOperationalSchema } = require('./src/config/migrations');
+const { startCustomerCleanup } = require('./src/services/customerCleanup');
 
 const isProduction = cleanEnv(process.env.NODE_ENV) === 'production';
 const allowedOrigins = (cleanEnv(process.env.CORS_ORIGIN) || cleanEnv(process.env.FRONTEND_URL))
@@ -70,7 +71,10 @@ app.get('/health/db', async (req, res) => {
 });
 
 ensureOperationalSchema()
-  .then(() => console.log('✅ Esquema operativo listo'))
+  .then(() => {
+    console.log('✅ Esquema operativo listo');
+    startCustomerCleanup();
+  })
   .catch(error => console.error('❌ Error preparando esquema:', error.message));
 
 // Rutas públicas (sin token)

@@ -301,6 +301,16 @@ Responda con el número de la opción.'
     'address_received',
     'Respuesta cuando el cliente escribe una dirección',
     'Dirección recibida. Un operador confirmará su taxi en breve.'
+  ),
+  (
+    'name_request',
+    'Pregunta para guardar el nombre del cliente cuando no está registrado',
+    '¿A nombre de quién solicita el taxi?'
+  ),
+  (
+    'name_saved',
+    'Confirmación después de guardar el nombre del cliente',
+    'Gracias. Un operador confirmará su taxi en breve.'
   )
 ON CONFLICT (key) DO UPDATE SET
   description = EXCLUDED.description,

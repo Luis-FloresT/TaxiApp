@@ -52,6 +52,20 @@ const ensureOperationalSchema = async () => {
     WHERE contact_type = 'customer'
       AND assigned_driver_phone IS NOT NULL
       AND ride_status = 'pending';
+
+    INSERT INTO bot_system_messages (key, description, value)
+    VALUES
+      (
+        'name_request',
+        'Pregunta para guardar el nombre del cliente cuando no está registrado',
+        '¿A nombre de quién solicita el taxi?'
+      ),
+      (
+        'name_saved',
+        'Confirmación después de guardar el nombre del cliente',
+        'Gracias. Un operador confirmará su taxi en breve.'
+      )
+    ON CONFLICT (key) DO NOTHING;
   `);
 };
 

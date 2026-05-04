@@ -260,7 +260,7 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
             (() => {
               const idleMinutes = Number(chat.idle_minutes || 0);
               const isDriver = chat.contact_type === 'driver';
-              const isManualContact = chat.manual_contact;
+              const isManualOnlyContact = chat.manual_contact && chat.status === 'active' && chat.ride_status === 'pending' && !chat.assigned_driver_phone;
               const needsAttention = !isDriver && chat.status === 'pending' && idleMinutes >= 5;
               return (
             <div
@@ -294,7 +294,7 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
                       </span>
                     ) : (
                       <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                        {isManualContact ? 'Cliente guardado' : (rideLabels[chat.ride_status] || 'Carrera pendiente')}
+                        {isManualOnlyContact ? 'Cliente guardado' : (rideLabels[chat.ride_status] || 'Carrera pendiente')}
                       </span>
                     )}
                     {needsAttention && (

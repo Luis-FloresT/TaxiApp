@@ -69,7 +69,11 @@ const upsertIncomingChat = async ({ pool, from, contactName, contactType }) => {
     `INSERT INTO chats (phone_number, contact_name, status, bot_active, bot_step, contact_type)
      VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (phone_number) DO UPDATE SET
-       contact_name = COALESCE(NULLIF(EXCLUDED.contact_name, ''), chats.contact_name),
+       contact_name = CASE
+         WHEN NULLIF(EXCLUDED.contact_name, '') IS NULL THEN chats.contact_name
+         WHEN LOWER(EXCLUDED.contact_name) IN ('desconocido', 'unknown') THEN chats.contact_name
+         ELSE EXCLUDED.contact_name
+       END,
        contact_type = CASE
          WHEN chats.contact_type = 'driver' OR EXCLUDED.contact_type = 'driver' THEN 'driver'
          ELSE chats.contact_type
