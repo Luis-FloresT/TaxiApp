@@ -7,6 +7,7 @@ const { isEnabled, cleanEnv } = require('../config/env');
 const { getPagination } = require('../utils/pagination');
 
 const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '');
+const MAX_CONTACT_IMPORT = 100;
 const rideStatusConfig = {
   pending: { label: 'Pendiente', timestampColumn: null },
   dispatched: { label: 'Taxista asignado', timestampColumn: 'driver_dispatched_at' },
@@ -144,6 +145,58 @@ const buildClientDriverConfirmation = ({ driverName, driverPhone, vehicleLabel }
   return lines.join('\n');
 };
 
+const upsertCustomerContact = async ({ name, phoneNumber, note }) => {
+  const normalizedPhone = normalizePhone(phoneNumber);
+  const cleanName = String(name || '').trim();
+  const cleanNote = String(note || '').trim();
+
+  if (!normalizedPhone || normalizedPhone.length < 8) {
+    return { ok: false, error: 'Número inválido', phoneNumber };
+  }
+
+  const existingResult = await pool.query(
+    `SELECT id, contact_type
+     FROM chats
+     WHERE phone_number = $1`,
+    [normalizedPhone]
+  );
+
+  if (existingResult.rows[0]?.contact_type === 'driver') {
+    return {
+      ok: false,
+      error: 'Este número ya está registrado como taxista',
+      phoneNumber: normalizedPhone
+    };
+  }
+
+  const result = await pool.query(
+    `INSERT INTO chats (
+       phone_number, contact_name, status, bot_active, bot_step,
+       contact_type, ride_status, manual_contact
+     )
+     VALUES ($1, $2, 'active', true, 'welcome', 'customer', 'pending', true)
+     ON CONFLICT (phone_number) DO UPDATE SET
+       contact_name = COALESCE(NULLIF(EXCLUDED.contact_name, ''), chats.contact_name),
+       status = CASE WHEN chats.status = 'closed' THEN 'active' ELSE chats.status END,
+       contact_type = 'customer',
+       manual_contact = true,
+       bot_active = CASE WHEN chats.contact_type = 'driver' THEN chats.bot_active ELSE chats.bot_active END,
+       updated_at = NOW()
+     RETURNING *`,
+    [normalizedPhone, cleanName || `Cliente +${normalizedPhone}`]
+  );
+
+  const chat = result.rows[0];
+  const message = cleanNote || 'Cliente agregado manualmente';
+  await pool.query(
+    `INSERT INTO messages (chat_id, content, from_agent, message_type)
+     VALUES ($1, $2, true, 'system')`,
+    [chat.id, message]
+  );
+
+  return { ok: true, chat };
+};
+
 // Obtener todos los chats
 router.get('/', async (req, res) => {
   const { limit, offset } = getPagination(req.query, { defaultLimit: 80, maxLimit: 150 });
@@ -162,6 +215,47 @@ router.get('/', async (req, res) => {
   res.set('X-Result-Offset', String(offset));
   res.set('X-Has-More', result.rows.length === limit ? 'true' : 'false');
   res.json(result.rows);
+});
+
+router.post('/customers', async (req, res) => {
+  const contacts = Array.isArray(req.body?.contacts)
+    ? req.body.contacts
+    : [{
+        name: req.body?.name,
+        phoneNumber: req.body?.phoneNumber,
+        note: req.body?.note
+      }];
+
+  if (contacts.length === 0) {
+    return res.status(400).json({ error: 'Debes enviar al menos un cliente' });
+  }
+
+  if (contacts.length > MAX_CONTACT_IMPORT) {
+    return res.status(400).json({ error: `Puedes importar máximo ${MAX_CONTACT_IMPORT} clientes por vez` });
+  }
+
+  try {
+    const results = [];
+    for (const contact of contacts) {
+      results.push(await upsertCustomerContact(contact));
+    }
+
+    const created = results.filter(result => result.ok).map(result => result.chat);
+    const errors = results.filter(result => !result.ok);
+
+    const { io } = require('../../index');
+    created.forEach(chat => io.emit('chat_updated', { chatId: chat.id, ...chat }));
+
+    res.status(created.length ? 201 : 400).json({
+      success: created.length > 0,
+      count: created.length,
+      chats: created,
+      errors
+    });
+  } catch (error) {
+    console.error('❌ Error guardando clientes:', error.message);
+    res.status(500).json({ error: 'No se pudieron guardar los clientes' });
+  }
 });
 
 // Obtener mensajes de un chat

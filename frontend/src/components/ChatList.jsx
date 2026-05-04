@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getChats } from '../services/api';
+import { createCustomerContacts, getChats } from '../services/api';
 import socket from '../services/socket';
 
 const rideLabels = {
@@ -16,6 +16,12 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
   const [chats, setChats] = useState([]);
   const [filter, setFilter] = useState('all');
   const [hasMore, setHasMore] = useState(false);
+  const [showAddContact, setShowAddContact] = useState(false);
+  const [contactName, setContactName] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [bulkContacts, setBulkContacts] = useState('');
+  const [contactError, setContactError] = useState('');
+  const [savingContact, setSavingContact] = useState(false);
   const pageSize = 80;
 
   useEffect(() => {
@@ -71,15 +77,66 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
     return 'Archivado';
   };
 
+  const parseBulkContacts = () => {
+    return bulkContacts
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map(line => {
+        const parts = line.split(/[,\t;]/).map(part => part.trim()).filter(Boolean);
+        if (parts.length === 1) {
+          return { phoneNumber: parts[0], name: '' };
+        }
+
+        return { name: parts[0], phoneNumber: parts.slice(1).join(' ') };
+      });
+  };
+
+  const handleSaveContact = async (event) => {
+    event.preventDefault();
+    setContactError('');
+    setSavingContact(true);
+
+    const payload = bulkContacts.trim()
+      ? { contacts: parseBulkContacts() }
+      : { name: contactName, phoneNumber: contactPhone };
+
+    try {
+      const response = await createCustomerContacts(payload);
+      const firstChat = response.data.chats?.[0];
+      setContactName('');
+      setContactPhone('');
+      setBulkContacts('');
+      setShowAddContact(false);
+      window.dispatchEvent(new Event('chats:refresh'));
+      if (firstChat) onSelectChat(firstChat);
+    } catch (error) {
+      const detail = error.response?.data?.errors?.[0]?.error || error.response?.data?.error;
+      setContactError(detail || 'No se pudo guardar el cliente');
+    } finally {
+      setSavingContact(false);
+    }
+  };
+
   return (
     <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
       {/* Header lista */}
       <div className="p-4 border-b border-gray-200 bg-gray-50">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-gray-700">Chats</h2>
-          <span className="bg-green-500 text-white text-xs px-2 py-1 rounded-full">
-            {openChats.length}
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowAddContact(true)}
+              className="text-xs px-2 py-1 rounded-lg bg-white border border-green-200 text-green-700 hover:bg-green-50"
+              title="Agregar cliente"
+            >
+              + Cliente
+            </button>
+            <span className="bg-green-500 text-white text-xs px-2 py-1 rounded-full">
+              {openChats.length}
+            </span>
+          </div>
         </div>
         {/* Filtros */}
         <div className="flex flex-wrap gap-2 mt-2">
@@ -104,6 +161,93 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
         </div>
       </div>
 
+      {showAddContact && (
+        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSaveContact}
+            className="w-full max-w-lg bg-white rounded-xl shadow-xl border border-gray-200 p-5"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="font-semibold text-gray-800">Agregar clientes</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Guarda contactos en el panel. Para escribirles por WhatsApp, Meta puede exigir que el cliente haya escrito primero.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddContact(false)}
+                className="text-gray-400 hover:text-gray-700 text-xl leading-none"
+                aria-label="Cerrar"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+              <label className="text-sm text-gray-700">
+                Nombre
+                <input
+                  value={contactName}
+                  onChange={(event) => setContactName(event.target.value)}
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="Luis Flores"
+                  disabled={Boolean(bulkContacts.trim())}
+                />
+              </label>
+              <label className="text-sm text-gray-700">
+                WhatsApp
+                <input
+                  value={contactPhone}
+                  onChange={(event) => setContactPhone(event.target.value)}
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="593969186861"
+                  disabled={Boolean(bulkContacts.trim())}
+                />
+              </label>
+            </div>
+
+            <div className="mt-4">
+              <label className="text-sm text-gray-700">
+                Agregar varios
+                <textarea
+                  value={bulkContacts}
+                  onChange={(event) => setBulkContacts(event.target.value)}
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 min-h-28 outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder={'Un cliente por línea:\nLuis Flores, 593969186861\nMaria Perez, 593987654321'}
+                />
+              </label>
+              <p className="text-xs text-gray-400 mt-1">
+                Puedes separar nombre y número con coma, punto y coma o tabulación.
+              </p>
+            </div>
+
+            {contactError && (
+              <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {contactError}
+              </div>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddContact(false)}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={savingContact || (!bulkContacts.trim() && !contactPhone.trim())}
+                className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-300"
+              >
+                {savingContact ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Lista de chats */}
       <div className="flex-1 overflow-y-auto">
         {visibleChats.length === 0 ? (
@@ -116,6 +260,7 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
             (() => {
               const idleMinutes = Number(chat.idle_minutes || 0);
               const isDriver = chat.contact_type === 'driver';
+              const isManualContact = chat.manual_contact;
               const needsAttention = !isDriver && chat.status === 'pending' && idleMinutes >= 5;
               return (
             <div
@@ -149,7 +294,7 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
                       </span>
                     ) : (
                       <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                        {rideLabels[chat.ride_status] || 'Carrera pendiente'}
+                        {isManualContact ? 'Cliente guardado' : (rideLabels[chat.ride_status] || 'Carrera pendiente')}
                       </span>
                     )}
                     {needsAttention && (

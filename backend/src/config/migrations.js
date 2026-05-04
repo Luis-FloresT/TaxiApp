@@ -12,6 +12,7 @@ const ensureOperationalSchema = async () => {
     ALTER TABLE chats ADD COLUMN IF NOT EXISTS picked_up_at TIMESTAMPTZ;
     ALTER TABLE chats ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
     ALTER TABLE chats ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+    ALTER TABLE chats ADD COLUMN IF NOT EXISTS manual_contact BOOLEAN NOT NULL DEFAULT false;
 
     ALTER TABLE driver_contacts ADD COLUMN IF NOT EXISTS availability_status VARCHAR(24) NOT NULL DEFAULT 'available';
     ALTER TABLE driver_contacts ADD COLUMN IF NOT EXISTS last_assigned_at TIMESTAMPTZ;
@@ -20,6 +21,7 @@ const ensureOperationalSchema = async () => {
     CREATE INDEX IF NOT EXISTS idx_chats_contact_type ON chats(contact_type);
     CREATE INDEX IF NOT EXISTS idx_chats_assigned_driver_phone ON chats(assigned_driver_phone);
     CREATE INDEX IF NOT EXISTS idx_chats_related_client_chat ON chats(related_client_chat_id);
+    CREATE INDEX IF NOT EXISTS idx_chats_manual_contact ON chats(manual_contact);
     CREATE INDEX IF NOT EXISTS idx_chats_open_updated_at ON chats(updated_at DESC) WHERE status <> 'closed';
     CREATE INDEX IF NOT EXISTS idx_messages_chat_timestamp_desc ON messages(chat_id, timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_chat_type_timestamp ON messages(chat_id, message_type, timestamp DESC);

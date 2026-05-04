@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS chats (
   picked_up_at TIMESTAMPTZ,
   completed_at TIMESTAMPTZ,
   cancelled_at TIMESTAMPTZ,
+  manual_contact BOOLEAN NOT NULL DEFAULT false,
   bot_active BOOLEAN NOT NULL DEFAULT true,
   bot_step VARCHAR(80) NOT NULL DEFAULT 'welcome',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -115,6 +116,7 @@ ALTER TABLE chats ADD COLUMN IF NOT EXISTS driver_en_route_at TIMESTAMPTZ;
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS picked_up_at TIMESTAMPTZ;
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS manual_contact BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS bot_active BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS bot_step VARCHAR(80) NOT NULL DEFAULT 'welcome';
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
@@ -171,6 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_chats_ride_status ON chats(ride_status);
 CREATE INDEX IF NOT EXISTS idx_chats_contact_type ON chats(contact_type);
 CREATE INDEX IF NOT EXISTS idx_chats_assigned_driver_phone ON chats(assigned_driver_phone);
 CREATE INDEX IF NOT EXISTS idx_chats_related_client_chat ON chats(related_client_chat_id);
+CREATE INDEX IF NOT EXISTS idx_chats_manual_contact ON chats(manual_contact);
 CREATE INDEX IF NOT EXISTS idx_chats_open_updated_at ON chats(updated_at DESC) WHERE status <> 'closed';
 CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON chats(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_timestamp ON messages(chat_id, timestamp ASC);

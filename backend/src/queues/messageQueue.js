@@ -79,6 +79,7 @@ const upsertIncomingChat = async ({ pool, from, contactName, contactType }) => {
          WHEN chats.contact_type = 'driver' OR EXCLUDED.contact_type = 'driver' THEN 'active'
          ELSE chats.status
        END,
+       manual_contact = false,
        bot_active = CASE
          WHEN chats.contact_type = 'driver' OR EXCLUDED.contact_type = 'driver' THEN false
          ELSE chats.bot_active
