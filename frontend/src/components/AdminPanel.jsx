@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  bulkDeleteCustomerChats,
   createAgent,
   createWhatsAppNumber,
   getAgents,
@@ -34,6 +35,7 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
   const [newLine, setNewLine] = useState(emptyLine);
   const [saving, setSaving] = useState('');
   const [error, setError] = useState('');
+  const [includeOpenRides, setIncludeOpenRides] = useState(false);
 
   const loadAll = () => {
     setError('');
@@ -117,6 +119,103 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
     }
   };
 
+  const handleBulkDeleteCustomers = async (period) => {
+    const labels = {
+      today: 'hoy',
+      week: 'los últimos 7 días',
+      all: 'todos los clientes guardados'
+    };
+    const scope = includeOpenRides
+      ? 'También se borrarán clientes pendientes y carreras activas.'
+      : 'Solo se borrarán clientes con carreras finalizadas o canceladas.';
+    const ok = confirm(
+      `¿Borrar chats de clientes de ${labels[period]}?\n\n${scope}\n\nEsto aplica a todos los operadores y todas las líneas. Los chats de taxistas no se borrarán.`
+    );
+
+    if (!ok) return;
+
+    setSaving(`cleanup-${period}`);
+    setError('');
+
+    try {
+      const res = await bulkDeleteCustomerChats(period, includeOpenRides);
+      alert(`Limpieza completada. Chats borrados: ${res.data.deleted_count}`);
+      loadAll();
+      window.dispatchEvent(new Event('chats:refresh'));
+    } catch (err) {
+      setError(err.response?.data?.error || 'No se pudieron borrar los chats');
+    } finally {
+      setSaving('');
+    }
+  };
+
+  const downloadStatsPdf = async () => {
+    if (!summary) return;
+
+    const { jsPDF } = await import('jspdf');
+    const doc = new jsPDF();
+    const date = new Date().toLocaleString('es-EC');
+    let y = 18;
+
+    doc.setFontSize(18);
+    doc.text('Reporte TaxiWhatsApp', 14, y);
+    y += 8;
+    doc.setFontSize(10);
+    doc.text(`Generado: ${date}`, 14, y);
+    y += 12;
+
+    const addSection = (title) => {
+      doc.setFontSize(13);
+      doc.text(title, 14, y);
+      y += 7;
+      doc.setFontSize(10);
+    };
+
+    const addRow = (label, value) => {
+      if (y > 275) {
+        doc.addPage();
+        y = 18;
+      }
+      doc.text(String(label), 16, y);
+      doc.text(String(value ?? 0), 180, y, { align: 'right' });
+      y += 6;
+    };
+
+    addSection('Resumen de hoy');
+    addRow('Chats nuevos hoy', today.new_chats_today);
+    addRow('Despachos hoy', today.dispatched_today);
+    addRow('Finalizadas hoy', today.completed_today);
+    addRow('Canceladas hoy', today.cancelled_today);
+    y += 4;
+
+    addSection('Totales del sistema');
+    addRow('Clientes', totals.total_customers);
+    addRow('Chats taxistas', totals.total_driver_chats);
+    addRow('Chats abiertos', totals.open_chats);
+    addRow('Archivados', totals.archived_chats);
+    addRow('Usuarios activos', agentStats.active_users);
+    addRow('Admins', agentStats.admins);
+    addRow('Operadores', agentStats.operators);
+    y += 4;
+
+    addSection('Actividad por línea');
+    (summary.by_line || []).forEach(item => {
+      addRow(`${item.line} - abiertos`, item.open_chats);
+      addRow(`${item.line} - chats hoy`, item.new_today);
+      addRow(`${item.line} - despachos hoy`, item.dispatched_today);
+    });
+    y += 4;
+
+    addSection('Taxistas con más despachos en 7 días');
+    (summary.top_drivers_7d || []).forEach(item => addRow(item.driver, item.total));
+    y += 4;
+
+    addSection('Atención');
+    addRow('Tiempo promedio primera respuesta', `${summary.response?.avg_first_response_minutes ?? 0} min`);
+
+    doc.save(`reporte-taxiwhatsapp-${new Date().toISOString().slice(0, 10)}.pdf`);
+  };
+
   const today = summary?.today || {};
   const totals = summary?.totals || {};
   const agentStats = summary?.agents || {};
@@ -160,6 +259,7 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
           {[
             ['users', 'Usuarios'],
             ['stats', 'Estadísticas'],
+            ['cleanup', 'Limpieza'],
             ['lines', 'Líneas WhatsApp']
           ].map(([value, label]) => (
             <button
@@ -291,6 +391,15 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
               <div className="text-center text-gray-400 py-8">Cargando estadísticas...</div>
             ) : (
               <>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={downloadStatsPdf}
+                    className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-900"
+                  >
+                    Descargar PDF
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[
                     ['Chats nuevos hoy', today.new_chats_today],
@@ -340,6 +449,60 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {tab === 'cleanup' && (
+          <div className="p-6 space-y-6">
+            <section className="rounded-lg border border-red-100 bg-red-50 p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-red-700">Borrar chats de clientes</h3>
+                  <p className="mt-1 text-sm text-red-700">
+                    Limpia chats de clientes de todos los operadores y todas las líneas. Los taxistas no se borran.
+                  </p>
+                </div>
+                <span className="text-2xl">🗑️</span>
+              </div>
+
+              <label className="mt-4 flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={includeOpenRides}
+                  onChange={e => setIncludeOpenRides(e.target.checked)}
+                />
+                Incluir clientes pendientes y carreras activas
+              </label>
+
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                {[
+                  ['today', 'Borrar clientes de hoy'],
+                  ['week', 'Borrar últimos 7 días'],
+                  ['all', 'Borrar todos los clientes']
+                ].map(([period, label]) => (
+                  <button
+                    key={period}
+                    type="button"
+                    onClick={() => handleBulkDeleteCustomers(period)}
+                    disabled={Boolean(saving)}
+                    className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50 ${
+                      period === 'all'
+                        ? 'bg-red-600 text-white hover:bg-red-700'
+                        : 'border border-red-200 bg-white text-red-600 hover:bg-red-50'
+                    }`}
+                  >
+                    {saving === `cleanup-${period}` ? 'Borrando...' : label}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-gray-200 p-5">
+              <h3 className="font-semibold text-gray-800">Uso recomendado</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Para aligerar la base de datos sin perder carreras en proceso, deja desmarcada la opción de pendientes/activas y borra por semana. Usa “todos” solo después de sacar reportes o cuando quieras limpiar completamente el histórico de clientes.
+              </p>
+            </section>
           </div>
         )}
 

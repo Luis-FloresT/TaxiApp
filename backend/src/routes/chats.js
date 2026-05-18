@@ -429,7 +429,8 @@ router.delete('/bulk/customers', async (req, res) => {
   const { period = 'today', includeOpenRides = false } = req.body || {};
   const periods = {
     today: "date_trunc('day', NOW())",
-    week: "NOW() - INTERVAL '7 days'"
+    week: "NOW() - INTERVAL '7 days'",
+    all: null
   };
 
   if (!canAdmin(req.agent?.role)) {
@@ -441,11 +442,14 @@ router.delete('/bulk/customers', async (req, res) => {
   }
 
   try {
+    const dateCondition = periods[period]
+      ? `AND updated_at >= ${periods[period]}`
+      : '';
     const result = await pool.query(
       `WITH deleted AS (
          DELETE FROM chats
          WHERE contact_type = 'customer'
-           AND updated_at >= ${periods[period]}
+           ${dateCondition}
            AND (
              $1::boolean = true
              OR ride_status IN ('completed', 'cancelled')
