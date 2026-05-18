@@ -1,0 +1,103 @@
+name: Railway Watchdog
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: railway-watchdog
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Check Railway services and restart when needed
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      BACKEND_HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL || 'https://taxiapp-production.up.railway.app/health' }}
+      DATABASE_HEALTH_URL: ${{ vars.DATABASE_HEALTH_URL || 'https://taxiapp-production.up.railway.app/health/db' }}
+      RAILWAY_BACK_SERVICE: ${{ vars.RAILWAY_BACK_SERVICE || 'back' }}
+      RAILWAY_POSTGRES_SERVICE: ${{ vars.RAILWAY_POSTGRES_SERVICE || 'Postgres' }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+    steps:
+      - name: Check backend and database health
+        id: health
+        shell: bash
+        run: |
+          check_url() {
+            local url="$1"
+            curl -fsS --max-time 12 --retry 2 --retry-delay 5 "$url" >/dev/null
+          }
+
+          if check_url "$BACKEND_HEALTH_URL"; then
+            echo "back_ok=true" >> "$GITHUB_OUTPUT"
+            echo "✅ Backend OK"
+          else
+            echo "back_ok=false" >> "$GITHUB_OUTPUT"
+            echo "❌ Backend health failed"
+          fi
+
+          if check_url "$DATABASE_HEALTH_URL"; then
+            echo "db_ok=true" >> "$GITHUB_OUTPUT"
+            echo "✅ Database OK"
+          else
+            echo "db_ok=false" >> "$GITHUB_OUTPUT"
+            echo "❌ Database health failed"
+          fi
+
+      - name: Stop if everything is healthy
+        if: steps.health.outputs.back_ok == 'true' && steps.health.outputs.db_ok == 'true'
+        run: echo "All services healthy. Nothing to restart."
+
+      - name: Validate Railway token
+        if: steps.health.outputs.back_ok != 'true' || steps.health.outputs.db_ok != 'true'
+        shell: bash
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "Missing GitHub secret RAILWAY_TOKEN. Cannot restart Railway services."
+            exit 1
+          fi
+
+      - name: Install Railway CLI
+        if: steps.health.outputs.back_ok != 'true' || steps.health.outputs.db_ok != 'true'
+        run: npm install -g @railway/cli
+
+      - name: Restart unhealthy Railway services
+        if: steps.health.outputs.back_ok != 'true' || steps.health.outputs.db_ok != 'true'
+        shell: bash
+        run: |
+          check_url() {
+            local url="$1"
+            curl -fsS --max-time 12 --retry 2 --retry-delay 5 "$url" >/dev/null
+          }
+
+          restart_service() {
+            local service="$1"
+            echo "🔁 Restarting Railway service: $service"
+            railway restart --service "$service" --yes
+          }
+
+          if [ "${{ steps.health.outputs.back_ok }}" != "true" ]; then
+            restart_service "$RAILWAY_BACK_SERVICE"
+            sleep 60
+          fi
+
+          if ! check_url "$BACKEND_HEALTH_URL"; then
+            echo "Backend still unhealthy after restart."
+            exit 1
+          fi
+
+          if ! check_url "$DATABASE_HEALTH_URL"; then
+            restart_service "$RAILWAY_POSTGRES_SERVICE"
+            sleep 75
+
+            # After Postgres restarts, restart the backend so it renews DB connections cleanly.
+            restart_service "$RAILWAY_BACK_SERVICE"
+            sleep 60
+          fi
+
+          check_url "$BACKEND_HEALTH_URL"
+          check_url "$DATABASE_HEALTH_URL"
+          echo "✅ Recovery finished. Backend and database health checks passed."
