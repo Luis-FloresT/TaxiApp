@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { sendWhatsAppText } = require('../services/whatsapp');
+const { assertCanUseLine } = require('../services/agentLineAccess');
 const { getPagination } = require('../utils/pagination');
 
 const sendMessage = async (req, res) => {
@@ -16,6 +17,8 @@ const sendMessage = async (req, res) => {
     if (chatResult.rows.length === 0) {
       return res.status(404).json({ error: 'Chat no encontrado' });
     }
+
+    await assertCanUseLine(req.agent, chatResult.rows[0].whatsapp_number_id);
 
     await sendWhatsAppText(to || chatResult.rows[0].phone_number, text, {
       whatsappNumberId: chatResult.rows[0].whatsapp_number_id
@@ -40,6 +43,10 @@ const sendMessage = async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
     const metaError = error.response?.data?.error;
     const detail = metaError?.message || error.message;
     console.error('❌ Error enviando mensaje:', detail);
@@ -55,21 +62,36 @@ const sendMessage = async (req, res) => {
 const getMessages = async (req, res) => {
   const { chatId } = req.params;
   const { limit, offset } = getPagination(req.query, { defaultLimit: 80, maxLimit: 200 });
-  const result = await pool.query(
-    `SELECT *
-     FROM (
-       SELECT * FROM messages
-       WHERE chat_id = $1
-       ORDER BY timestamp DESC
-       LIMIT $2 OFFSET $3
-     ) recent
-     ORDER BY timestamp ASC`,
-    [chatId, limit, offset]
-  );
-  res.set('X-Result-Limit', String(limit));
-  res.set('X-Result-Offset', String(offset));
-  res.set('X-Has-More', result.rows.length === limit ? 'true' : 'false');
-  res.json(result.rows);
+  try {
+    const chatResult = await pool.query(
+      'SELECT whatsapp_number_id FROM chats WHERE id = $1',
+      [chatId]
+    );
+
+    if (chatResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Chat no encontrado' });
+    }
+
+    await assertCanUseLine(req.agent, chatResult.rows[0].whatsapp_number_id);
+
+    const result = await pool.query(
+      `SELECT *
+       FROM (
+         SELECT * FROM messages
+         WHERE chat_id = $1
+         ORDER BY timestamp DESC
+         LIMIT $2 OFFSET $3
+       ) recent
+       ORDER BY timestamp ASC`,
+      [chatId, limit, offset]
+    );
+    res.set('X-Result-Limit', String(limit));
+    res.set('X-Result-Offset', String(offset));
+    res.set('X-Has-More', result.rows.length === limit ? 'true' : 'false');
+    res.json(result.rows);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'No se pudieron cargar los mensajes' });
+  }
 };
 
 module.exports = { sendMessage, getMessages };

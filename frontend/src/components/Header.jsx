@@ -10,6 +10,10 @@ const Header = ({
   selectedWhatsappNumberId = 'all',
   onWhatsappNumberChange
 }) => {
+  const canSeeAllLines = agent?.can_view_all_numbers !== false;
+  const canSwitchLines = agent?.can_switch_numbers !== false && whatsappNumbers.length > 1;
+  const selectedLine = whatsappNumbers.find(number => String(number.id) === String(selectedWhatsappNumberId));
+
   return (
     <div className="bg-green-600 text-white px-6 py-4 flex items-center gap-3 shadow-md">
       <div className="text-2xl">🚖</div>
@@ -22,19 +26,25 @@ const Header = ({
         {whatsappNumbers.length > 0 && (
           <label className="flex items-center gap-2 bg-green-700 px-3 py-1.5 rounded-lg text-sm">
             <span className="text-green-100">Línea</span>
-            <select
-              value={selectedWhatsappNumberId}
-              onChange={(event) => onWhatsappNumberChange?.(event.target.value)}
-              className="bg-green-800 text-white rounded-md px-2 py-1 text-sm outline-none"
-              title="Número de WhatsApp con el que trabaja este operador"
-            >
-              <option value="all">Todas</option>
-              {whatsappNumbers.map(number => (
-                <option key={number.id} value={number.id}>
-                  {number.label}{number.display_phone_number ? ` · +${number.display_phone_number}` : ''}
-                </option>
-              ))}
-            </select>
+            {canSwitchLines ? (
+              <select
+                value={selectedWhatsappNumberId}
+                onChange={(event) => onWhatsappNumberChange?.(event.target.value)}
+                className="bg-green-800 text-white rounded-md px-2 py-1 text-sm outline-none"
+                title="Número de WhatsApp con el que trabaja este operador"
+              >
+                {canSeeAllLines && <option value="all">Todas</option>}
+                {whatsappNumbers.map(number => (
+                  <option key={number.id} value={number.id}>
+                    {number.label}{number.display_phone_number ? ` · +${number.display_phone_number}` : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="bg-green-800 text-white rounded-md px-2 py-1 text-sm">
+                {selectedLine?.label || whatsappNumbers[0]?.label || 'Asignada'}
+              </span>
+            )}
           </label>
         )}
 

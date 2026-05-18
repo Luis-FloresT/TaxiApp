@@ -9,7 +9,7 @@ const canAdmin = (role) => ['admin', 'superadmin'].includes(role);
 
 router.get('/', async (req, res) => {
   try {
-    const numbers = await listWhatsAppNumbers();
+    const numbers = await listWhatsAppNumbers(req.agent);
     res.json(numbers);
   } catch (error) {
     console.error('❌ Error cargando líneas de WhatsApp:', error.message);

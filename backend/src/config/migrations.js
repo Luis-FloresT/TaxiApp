@@ -4,6 +4,9 @@ const { syncConfiguredWhatsAppNumbers } = require('../services/whatsappNumbers')
 const ensureOperationalSchema = async () => {
   await pool.query(`
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS role VARCHAR(24) NOT NULL DEFAULT 'operator';
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS can_view_all_numbers BOOLEAN NOT NULL DEFAULT true;
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS can_switch_numbers BOOLEAN NOT NULL DEFAULT true;
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS default_whatsapp_number_id INTEGER;
 
     CREATE TABLE IF NOT EXISTS whatsapp_numbers (
       id SERIAL PRIMARY KEY,
@@ -15,6 +18,19 @@ const ensureOperationalSchema = async () => {
       active BOOLEAN NOT NULL DEFAULT true,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    ALTER TABLE agents
+      DROP CONSTRAINT IF EXISTS agents_default_whatsapp_number_id_fkey;
+    ALTER TABLE agents
+      ADD CONSTRAINT agents_default_whatsapp_number_id_fkey
+      FOREIGN KEY (default_whatsapp_number_id) REFERENCES whatsapp_numbers(id) ON DELETE SET NULL;
+
+    CREATE TABLE IF NOT EXISTS agent_whatsapp_numbers (
+      agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      whatsapp_number_id INTEGER NOT NULL REFERENCES whatsapp_numbers(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (agent_id, whatsapp_number_id)
     );
 
     ALTER TABLE chats ADD COLUMN IF NOT EXISTS ride_status VARCHAR(32) NOT NULL DEFAULT 'pending';
@@ -44,6 +60,8 @@ const ensureOperationalSchema = async () => {
     CREATE INDEX IF NOT EXISTS idx_messages_chat_type_timestamp ON messages(chat_id, message_type, timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_driver_contacts_availability ON driver_contacts(availability_status);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_whatsapp_numbers_phone_id_unique ON whatsapp_numbers(phone_number_id);
+    CREATE INDEX IF NOT EXISTS idx_agents_default_whatsapp_number ON agents(default_whatsapp_number_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_whatsapp_numbers_number ON agent_whatsapp_numbers(whatsapp_number_id);
 
     ALTER TABLE chats DROP CONSTRAINT IF EXISTS chats_phone_number_key;
     DROP INDEX IF EXISTS idx_chats_phone_number_unique;

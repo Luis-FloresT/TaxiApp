@@ -4,6 +4,7 @@ const pool = require('../config/db');
 const { sendMessage, getMessages } = require('../controllers/messageController');
 const { trySendWhatsAppText } = require('../services/whatsapp');
 const { getWhatsAppNumberById } = require('../services/whatsappNumbers');
+const { assertCanUseLine, canAdmin, resolveRequestedLineId } = require('../services/agentLineAccess');
 const { isEnabled, cleanEnv } = require('../config/env');
 const { getPagination } = require('../utils/pagination');
 
@@ -21,7 +22,24 @@ const rideStatusConfig = {
 
 const allowedRideStatuses = Object.keys(rideStatusConfig);
 const terminalRideStatuses = ['completed', 'cancelled'];
-const canAdmin = (role) => ['admin', 'superadmin'].includes(role);
+
+const assertCanAccessChat = async (agent, chatId) => {
+  if (canAdmin(agent?.role)) return true;
+
+  const result = await pool.query(
+    'SELECT whatsapp_number_id FROM chats WHERE id = $1',
+    [chatId]
+  );
+
+  if (result.rows.length === 0) {
+    const error = new Error('Chat no encontrado');
+    error.status = 404;
+    throw error;
+  }
+
+  await assertCanUseLine(agent, result.rows[0].whatsapp_number_id);
+  return true;
+};
 
 const upsertDriverChat = async ({ driverPhone, driverName, vehicleLabel, dispatchText, sourceChat }) => {
   const fallbackName = driverName || `Taxista +${driverPhone}`;
@@ -210,28 +228,34 @@ const upsertCustomerContact = async ({ name, phoneNumber, note, whatsappNumberId
 // Obtener todos los chats
 router.get('/', async (req, res) => {
   const { limit, offset } = getPagination(req.query, { defaultLimit: 80, maxLimit: 150 });
-  const whatsappNumberId = req.query.whatsappNumberId === 'all' ? null : Number(req.query.whatsappNumberId || 0);
-  const filterByLine = Number.isInteger(whatsappNumberId) && whatsappNumberId > 0;
-  const result = await pool.query(
-    `SELECT c.*,
-            wn.label AS whatsapp_label,
-            wn.display_phone_number AS whatsapp_display_phone,
-            wn.phone_number_id AS whatsapp_phone_number_id,
-            EXTRACT(EPOCH FROM (NOW() - c.updated_at)) / 60 as idle_minutes,
-            (SELECT content FROM messages WHERE chat_id = c.id
-             AND message_type <> 'dispatch'
-             ORDER BY timestamp DESC LIMIT 1) as last_message
-     FROM chats c
-     LEFT JOIN whatsapp_numbers wn ON wn.id = c.whatsapp_number_id
-     WHERE ($3::boolean = false OR c.whatsapp_number_id = $4)
-     ORDER BY c.updated_at DESC
-     LIMIT $1 OFFSET $2`,
-    [limit, offset, filterByLine, filterByLine ? whatsappNumberId : null]
-  );
-  res.set('X-Result-Limit', String(limit));
-  res.set('X-Result-Offset', String(offset));
-  res.set('X-Has-More', result.rows.length === limit ? 'true' : 'false');
-  res.json(result.rows);
+  const requestedLineId = req.query.whatsappNumberId === 'all' ? null : Number(req.query.whatsappNumberId || 0);
+
+  try {
+    const whatsappNumberId = await resolveRequestedLineId(req.agent, requestedLineId);
+    const filterByLine = Number.isInteger(whatsappNumberId) && whatsappNumberId > 0;
+    const result = await pool.query(
+      `SELECT c.*,
+              wn.label AS whatsapp_label,
+              wn.display_phone_number AS whatsapp_display_phone,
+              wn.phone_number_id AS whatsapp_phone_number_id,
+              EXTRACT(EPOCH FROM (NOW() - c.updated_at)) / 60 as idle_minutes,
+              (SELECT content FROM messages WHERE chat_id = c.id
+               AND message_type <> 'dispatch'
+               ORDER BY timestamp DESC LIMIT 1) as last_message
+       FROM chats c
+       LEFT JOIN whatsapp_numbers wn ON wn.id = c.whatsapp_number_id
+       WHERE ($3::boolean = false OR c.whatsapp_number_id = $4)
+       ORDER BY c.updated_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset, filterByLine, filterByLine ? whatsappNumberId : null]
+    );
+    res.set('X-Result-Limit', String(limit));
+    res.set('X-Result-Offset', String(offset));
+    res.set('X-Has-More', result.rows.length === limit ? 'true' : 'false');
+    res.json(result.rows);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'No se pudieron cargar los chats' });
+  }
 });
 
 router.post('/customers', async (req, res) => {
@@ -255,9 +279,13 @@ router.post('/customers', async (req, res) => {
   try {
     const results = [];
     for (const contact of contacts) {
+      const whatsappNumberId = await resolveRequestedLineId(
+        req.agent,
+        contact.whatsappNumberId || req.body?.whatsappNumberId
+      );
       results.push(await upsertCustomerContact({
         ...contact,
-        whatsappNumberId: contact.whatsappNumberId || req.body?.whatsappNumberId
+        whatsappNumberId
       }));
     }
 
@@ -275,7 +303,7 @@ router.post('/customers', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error guardando clientes:', error.message);
-    res.status(500).json({ error: 'No se pudieron guardar los clientes' });
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'No se pudieron guardar los clientes' });
   }
 });
 
@@ -286,6 +314,7 @@ router.get('/:chatId/history', async (req, res) => {
   const { chatId } = req.params;
 
   try {
+    await assertCanAccessChat(req.agent, chatId);
     const chatResult = await pool.query(
       `SELECT id, phone_number, contact_name, assigned_driver_name, assigned_driver_phone,
               assigned_driver_vehicle_label, ride_status, driver_dispatched_at,
@@ -336,7 +365,7 @@ router.get('/:chatId/history', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error obteniendo historial:', error.message);
-    res.status(500).json({ error: 'No se pudo cargar el historial' });
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'No se pudo cargar el historial' });
   }
 });
 
@@ -345,6 +374,7 @@ router.patch('/:chatId/ride-status', async (req, res) => {
   const { status: nextStatus } = req.body;
 
   try {
+    await assertCanAccessChat(req.agent, chatId);
     const chat = await updateRideStatus(chatId, nextStatus);
     const statusLabel = rideStatusConfig[nextStatus].label;
     await addRideNote(chatId, `Estado de carrera actualizado: ${statusLabel}`);
@@ -365,7 +395,7 @@ router.patch('/:chatId/ride-status', async (req, res) => {
     res.json({ success: true, chat });
   } catch (error) {
     console.error('❌ Error actualizando estado:', error.message);
-    const code = error.message.includes('inválido') ? 400 : 500;
+    const code = error.status || (error.message.includes('inválido') ? 400 : 500);
     res.status(code).json({ error: error.message || 'No se pudo actualizar el estado' });
   }
 });
@@ -375,6 +405,7 @@ router.patch('/:chatId/archive', async (req, res) => {
   const { chatId } = req.params;
 
   try {
+    await assertCanAccessChat(req.agent, chatId);
     const result = await pool.query(
       `UPDATE chats
        SET status = 'closed', updated_at = NOW()
@@ -393,7 +424,7 @@ router.patch('/:chatId/archive', async (req, res) => {
     res.json({ success: true, chat: result.rows[0] });
   } catch (error) {
     console.error('❌ Error archivando chat:', error.message);
-    res.status(500).json({ error: 'No se pudo archivar el chat' });
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'No se pudo archivar el chat' });
   }
 });
 
@@ -402,6 +433,7 @@ router.patch('/:chatId/restore', async (req, res) => {
   const { chatId } = req.params;
 
   try {
+    await assertCanAccessChat(req.agent, chatId);
     const result = await pool.query(
       `UPDATE chats
        SET status = 'active', updated_at = NOW()
@@ -420,7 +452,7 @@ router.patch('/:chatId/restore', async (req, res) => {
     res.json({ success: true, chat: result.rows[0] });
   } catch (error) {
     console.error('❌ Error restaurando chat:', error.message);
-    res.status(500).json({ error: 'No se pudo restaurar el chat' });
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'No se pudo restaurar el chat' });
   }
 });
 
@@ -437,7 +469,7 @@ router.delete('/bulk/customers', async (req, res) => {
     return res.status(403).json({ error: 'Solo un administrador puede borrar chats en lote' });
   }
 
-  if (!periods[period]) {
+  if (!Object.prototype.hasOwnProperty.call(periods, period)) {
     return res.status(400).json({ error: 'Periodo inválido' });
   }
 
@@ -487,6 +519,7 @@ router.delete('/:chatId', async (req, res) => {
   }
 
   try {
+    await assertCanAccessChat(req.agent, chatId);
     const result = await pool.query(
       `DELETE FROM chats
        WHERE id = $1
@@ -504,7 +537,7 @@ router.delete('/:chatId', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('❌ Error borrando chat:', error.message);
-    res.status(500).json({ error: 'No se pudo borrar el chat' });
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'No se pudo borrar el chat' });
   }
 });
 
@@ -520,6 +553,7 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
   let selectedVehicleLabel = String(vehicleLabel || '').trim();
 
   try {
+    await assertCanAccessChat(req.agent, chatId);
     if (driverId) {
       const driverResult = await pool.query(
         `SELECT name, phone_number, vehicle_label
@@ -679,7 +713,7 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error despachando taxista:', error.message);
-    res.status(500).json({ error: 'No se pudo despachar la carrera al taxista' });
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'No se pudo despachar la carrera al taxista' });
   }
 });
 
@@ -706,6 +740,12 @@ router.post('/:chatId/bot', async (req, res) => {
   const { chatId } = req.params;
   const { active } = req.body;
   const { reactivateBot, deactivateBot } = require('../bot/chatbot');
+
+  try {
+    await assertCanAccessChat(req.agent, chatId);
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.message || 'No se pudo validar el chat' });
+  }
 
   const chatResult = await pool.query(
     'SELECT contact_type FROM chats WHERE id = $1',

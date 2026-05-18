@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 const { cleanEnv } = require('../config/env');
+const { loadAgentAccess } = require('../services/agentLineAccess');
 
 const getJwtConfig = () => ({
   secret: cleanEnv(process.env.JWT_SECRET, 'change_this_in_production'),
@@ -38,15 +39,20 @@ router.post('/login', async (req, res) => {
       { expiresIn: jwtConfig.expiresIn }
     );
 
+    const freshAgent = await loadAgentAccess(agent.id);
+
     res.json({
       token,
       agent: {
-        id: agent.id,
-        name: agent.name,
-        username: agent.username,
-        email: agent.email,
-        role: agent.role || 'operator',
-        is_admin: ['admin', 'superadmin'].includes(agent.role || 'operator')
+        id: freshAgent.id,
+        name: freshAgent.name,
+        username: freshAgent.username,
+        email: freshAgent.email,
+        role: freshAgent.role || 'operator',
+        can_view_all_numbers: freshAgent.can_view_all_numbers !== false,
+        can_switch_numbers: freshAgent.can_switch_numbers !== false,
+        default_whatsapp_number_id: freshAgent.default_whatsapp_number_id,
+        is_admin: ['admin', 'superadmin'].includes(freshAgent.role || 'operator')
       }
     });
   } catch (err) {
@@ -64,7 +70,18 @@ router.get('/me', async (req, res) => {
 
   try {
     const decoded = jwt.verify(token, getJwtConfig().secret);
-    res.json({ agent: decoded });
+    const agent = await loadAgentAccess(decoded.id);
+
+    if (!agent) {
+      return res.status(403).json({ error: 'Usuario inválido o inactivo' });
+    }
+
+    res.json({
+      agent: {
+        ...agent,
+        is_admin: ['admin', 'superadmin'].includes(agent.role || 'operator')
+      }
+    });
   } catch {
     res.status(403).json({ error: 'Token inválido' });
   }

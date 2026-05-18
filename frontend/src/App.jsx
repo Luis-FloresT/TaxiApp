@@ -10,7 +10,7 @@ import DriversPanel from './components/DriversPanel';
 import ReportsPanel from './components/ReportsPanel';
 import MaintenancePanel from './components/MaintenancePanel';
 import AdminPanel from './components/AdminPanel';
-import { getWhatsAppNumbers } from './services/api';
+import { getMe, getWhatsAppNumbers } from './services/api';
 
 const lineStorageKey = (username) => `selectedWhatsappNumberId:${username || 'default'}`;
 
@@ -49,14 +49,42 @@ function App() {
   });
 
   useEffect(() => {
+    if (!localStorage.getItem('token')) return;
+
+    getMe()
+      .then(res => {
+        const freshAgent = res.data.agent;
+        localStorage.setItem('agent', JSON.stringify(freshAgent));
+        setAgent(freshAgent);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     if (!agent) return;
 
     getWhatsAppNumbers()
       .then(res => {
-        setWhatsappNumbers(res.data);
+        const numbers = res.data;
+        setWhatsappNumbers(numbers);
+
+        const canSeeAll = agent.can_view_all_numbers !== false;
+        const canSwitch = agent.can_switch_numbers !== false;
+        const preferredFixedLine = agent.default_whatsapp_number_id || numbers[0]?.id;
+
+        if (!canSwitch && preferredFixedLine) {
+          setSelectedWhatsappNumberId(String(preferredFixedLine));
+          return;
+        }
+
+        if (selectedWhatsappNumberId === 'all' && !canSeeAll) {
+          setSelectedWhatsappNumberId(String(preferredFixedLine || 'all'));
+          return;
+        }
+
         if (selectedWhatsappNumberId !== 'all') {
-          const exists = res.data.some(item => String(item.id) === String(selectedWhatsappNumberId));
-          if (!exists) setSelectedWhatsappNumberId('all');
+          const exists = numbers.some(item => String(item.id) === String(selectedWhatsappNumberId));
+          if (!exists) setSelectedWhatsappNumberId(canSeeAll ? 'all' : String(preferredFixedLine || 'all'));
         }
       })
       .catch(error => console.error('Error cargando líneas de WhatsApp:', error));

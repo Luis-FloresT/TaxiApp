@@ -3,6 +3,7 @@ import {
   bulkDeleteCustomerChats,
   createAgent,
   createWhatsAppNumber,
+  deleteAgent,
   getAgents,
   getReportSummary,
   getWhatsAppNumbers,
@@ -15,7 +16,11 @@ const emptyUser = {
   username: '',
   email: '',
   password: '',
-  role: 'operator'
+  role: 'operator',
+  can_view_all_numbers: true,
+  can_switch_numbers: true,
+  default_whatsapp_number_id: '',
+  allowed_whatsapp_number_ids: []
 };
 
 const isAdminRole = (role) => ['admin', 'superadmin'].includes(role);
@@ -24,6 +29,17 @@ const emptyLine = {
   label: '',
   phoneNumberId: '',
   displayPhone: ''
+};
+
+const getLineAccessMode = (user) => {
+  if (user.can_view_all_numbers !== false) return 'all';
+  return user.can_switch_numbers !== false ? 'assigned' : 'fixed';
+};
+
+const getLineLabel = (lines, id) => {
+  const line = lines.find(item => String(item.id) === String(id));
+  if (!line) return 'Sin línea fija';
+  return `${line.label}${line.display_phone_number ? ` · +${line.display_phone_number}` : ''}`;
 };
 
 const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout, onOpenOperatorPanel }) => {
@@ -36,6 +52,8 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
   const [saving, setSaving] = useState('');
   const [error, setError] = useState('');
   const [includeOpenRides, setIncludeOpenRides] = useState(false);
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [userDrafts, setUserDrafts] = useState({});
 
   const loadAll = () => {
     setError('');
@@ -46,6 +64,45 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
         setLines(linesRes.data);
       })
       .catch(err => setError(err.response?.data?.error || 'No se pudo cargar el panel admin'));
+  };
+
+  const getAllowedLineIds = (user) => (
+    Array.isArray(user.allowed_whatsapp_number_ids) ? user.allowed_whatsapp_number_ids.map(String) : []
+  );
+
+  const buildAccessPatch = (user, mode, extra = {}) => {
+    const firstLineId = lines[0]?.id || null;
+    const currentAllowed = getAllowedLineIds(user);
+    const fallbackDefault = user.default_whatsapp_number_id || currentAllowed[0] || firstLineId;
+    const defaultLineId = extra.default_whatsapp_number_id ?? fallbackDefault ?? null;
+    const allowedLineIds = extra.allowed_whatsapp_number_ids ?? (
+      currentAllowed.length ? currentAllowed : (defaultLineId ? [defaultLineId] : [])
+    );
+
+    if (mode === 'all') {
+      return {
+        can_view_all_numbers: true,
+        can_switch_numbers: true,
+        default_whatsapp_number_id: defaultLineId || null,
+        allowed_whatsapp_number_ids: allowedLineIds
+      };
+    }
+
+    if (mode === 'fixed') {
+      return {
+        can_view_all_numbers: false,
+        can_switch_numbers: false,
+        default_whatsapp_number_id: defaultLineId || null,
+        allowed_whatsapp_number_ids: defaultLineId ? [defaultLineId] : allowedLineIds
+      };
+    }
+
+    return {
+      can_view_all_numbers: false,
+      can_switch_numbers: true,
+      default_whatsapp_number_id: defaultLineId || null,
+      allowed_whatsapp_number_ids: allowedLineIds
+    };
   };
 
   useEffect(() => {
@@ -79,6 +136,34 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
       setUsers(current => current.map(user => (user.id === id ? res.data : user)));
     } catch (err) {
       setError(err.response?.data?.error || 'No se pudo actualizar el usuario');
+    } finally {
+      setSaving('');
+    }
+  };
+
+  const handleSaveUserProfile = async (user) => {
+    const draft = userDrafts[user.id] || {};
+    await handleUpdateUser(user.id, {
+      name: draft.name ?? user.name,
+      email: draft.email ?? user.email ?? ''
+    });
+    setEditingUserId(null);
+  };
+
+  const handleDeleteUser = async (user) => {
+    const ok = confirm(
+      `¿Eliminar el usuario ${user.name} (@${user.username})?\n\nNo se borrarán los chats, pero este operador ya no podrá iniciar sesión.`
+    );
+    if (!ok) return;
+
+    setSaving(`delete-${user.id}`);
+    setError('');
+
+    try {
+      await deleteAgent(user.id);
+      setUsers(current => current.filter(item => item.id !== user.id));
+    } catch (err) {
+      setError(err.response?.data?.error || 'No se pudo eliminar el usuario');
     } finally {
       setSaving('');
     }
@@ -321,6 +406,36 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
                 <option value="admin">Admin</option>
                 {agent?.role === 'superadmin' && <option value="superadmin">Superadmin</option>}
               </select>
+              <select
+                value={getLineAccessMode(newUser)}
+                onChange={e => setNewUser({ ...newUser, ...buildAccessPatch(newUser, e.target.value) })}
+                className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+              >
+                <option value="all">Puede ver y cambiar todos los números</option>
+                <option value="assigned">Puede cambiar solo entre números asignados</option>
+                <option value="fixed">Número fijo asignado</option>
+              </select>
+              {getLineAccessMode(newUser) !== 'all' && (
+                <select
+                  value={newUser.default_whatsapp_number_id || ''}
+                  onChange={e => {
+                    const lineId = e.target.value;
+                    setNewUser({
+                      ...newUser,
+                      ...buildAccessPatch(newUser, getLineAccessMode(newUser), {
+                        default_whatsapp_number_id: lineId,
+                        allowed_whatsapp_number_ids: [lineId]
+                      })
+                    });
+                  }}
+                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+                >
+                  <option value="">Selecciona número asignado</option>
+                  {lines.map(line => (
+                    <option key={line.id} value={line.id}>{getLineLabel(lines, line.id)}</option>
+                  ))}
+                </select>
+              )}
               <button
                 disabled={saving === 'user'}
                 className="w-full rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:bg-gray-300"
@@ -329,54 +444,196 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
               </button>
             </form>
 
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
-              <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr] bg-gray-50 px-4 py-2 text-xs font-semibold text-gray-500">
-                <span>Usuario</span>
-                <span>Rol</span>
-                <span>Estado</span>
-                <span className="text-right">Acciones</span>
-              </div>
+            <div className="space-y-3">
               {users.map(user => (
-                <div key={user.id} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] items-center border-t px-4 py-3 text-sm">
-                  <div>
-                    <p className="font-medium text-gray-800">{user.name}</p>
-                    <p className="text-xs text-gray-500">@{user.username}{user.email ? ` · ${user.email}` : ''}</p>
+                <div key={user.id} className="rounded-lg border border-gray-200 bg-white p-4 text-sm">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0">
+                      {editingUserId === user.id ? (
+                        <div className="space-y-2">
+                          <input
+                            value={userDrafts[user.id]?.name ?? user.name}
+                            onChange={e => setUserDrafts(current => ({
+                              ...current,
+                              [user.id]: { ...current[user.id], name: e.target.value }
+                            }))}
+                            className="w-full border rounded-lg px-3 py-2 text-sm"
+                            placeholder="Nombre visible"
+                          />
+                          <input
+                            value={userDrafts[user.id]?.email ?? user.email ?? ''}
+                            onChange={e => setUserDrafts(current => ({
+                              ...current,
+                              [user.id]: { ...current[user.id], email: e.target.value }
+                            }))}
+                            className="w-full border rounded-lg px-3 py-2 text-sm"
+                            placeholder="correo opcional"
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <p className="font-medium text-gray-800">{user.name}</p>
+                          <p className="text-xs text-gray-500">@{user.username}{user.email ? ` · ${user.email}` : ''}</p>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {user.role === 'superadmin' && agent?.role !== 'superadmin' ? (
+                        <span className="w-fit rounded-lg bg-purple-50 px-2 py-1 text-xs text-purple-700">
+                          Superadmin
+                        </span>
+                      ) : (
+                        <select
+                          value={user.role}
+                          onChange={e => handleUpdateUser(user.id, { role: e.target.value })}
+                          disabled={saving === `user-${user.id}`}
+                          className="w-fit border rounded-lg px-2 py-1 text-xs bg-white"
+                        >
+                          <option value="operator">Operador</option>
+                          <option value="admin">Admin</option>
+                          {agent?.role === 'superadmin' && <option value="superadmin">Superadmin</option>}
+                        </select>
+                      )}
+                      <button
+                        type="button"
+                        disabled={user.id === agent?.id || (user.role === 'superadmin' && agent?.role !== 'superadmin') || saving === `user-${user.id}`}
+                        onClick={() => handleUpdateUser(user.id, { active: !user.active })}
+                        className={`w-fit rounded-full px-2 py-1 text-xs font-medium ${
+                          user.active
+                            ? 'bg-green-50 text-green-700'
+                            : 'bg-gray-100 text-gray-500'
+                        } disabled:opacity-50`}
+                      >
+                        {user.active ? 'Activo' : 'Inactivo'}
+                      </button>
+                    </div>
                   </div>
-                  {user.role === 'superadmin' && agent?.role !== 'superadmin' ? (
-                    <span className="w-fit rounded-lg bg-purple-50 px-2 py-1 text-xs text-purple-700">
-                      Superadmin
-                    </span>
-                  ) : (
-                    <select
-                      value={user.role}
-                      onChange={e => handleUpdateUser(user.id, { role: e.target.value })}
-                      disabled={saving === `user-${user.id}`}
-                      className="w-fit border rounded-lg px-2 py-1 text-xs bg-white"
-                    >
-                      <option value="operator">Operador</option>
-                      <option value="admin">Admin</option>
-                      {agent?.role === 'superadmin' && <option value="superadmin">Superadmin</option>}
-                    </select>
-                  )}
-                  <button
-                    type="button"
-                    disabled={user.id === agent?.id || (user.role === 'superadmin' && agent?.role !== 'superadmin') || saving === `user-${user.id}`}
-                    onClick={() => handleUpdateUser(user.id, { active: !user.active })}
-                    className={`w-fit rounded-full px-2 py-1 text-xs font-medium ${
-                      user.active
-                        ? 'bg-green-50 text-green-700'
-                        : 'bg-gray-100 text-gray-500'
-                    } disabled:opacity-50`}
-                  >
-                    {user.active ? 'Activo' : 'Inactivo'}
-                  </button>
-                  <div className="flex justify-end gap-2">
+
+                  <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg bg-gray-50 p-3 md:grid-cols-[220px_1fr_220px]">
+                    <label className="text-xs font-medium text-gray-600">
+                      Acceso a números
+                      <select
+                        value={getLineAccessMode(user)}
+                        onChange={e => handleUpdateUser(user.id, buildAccessPatch(user, e.target.value))}
+                        disabled={saving === `user-${user.id}` || (user.role === 'superadmin' && agent?.role !== 'superadmin')}
+                        className="mt-1 w-full border rounded-lg px-2 py-2 text-xs bg-white"
+                      >
+                        <option value="all">Ve todos y puede cambiar</option>
+                        <option value="assigned">Cambia entre asignados</option>
+                        <option value="fixed">Número fijo</option>
+                      </select>
+                    </label>
+
+                    <div className="text-xs text-gray-600">
+                      <p className="font-medium">Números asignados</p>
+                      {getLineAccessMode(user) === 'all' ? (
+                        <p className="mt-2 text-gray-400">Tiene acceso a todas las líneas activas.</p>
+                      ) : (
+                        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {lines.map(line => {
+                            const allowed = getAllowedLineIds(user).includes(String(line.id));
+                            return (
+                              <label key={line.id} className="flex items-center gap-2 rounded-md bg-white px-2 py-1.5">
+                                <input
+                                  type="checkbox"
+                                  checked={allowed}
+                                  disabled={saving === `user-${user.id}` || getLineAccessMode(user) === 'fixed'}
+                                  onChange={e => {
+                                    const currentIds = getAllowedLineIds(user);
+                                    const nextIds = e.target.checked
+                                      ? [...new Set([...currentIds, String(line.id)])]
+                                      : currentIds.filter(id => id !== String(line.id));
+                                    handleUpdateUser(user.id, buildAccessPatch(user, getLineAccessMode(user), {
+                                      allowed_whatsapp_number_ids: nextIds,
+                                      default_whatsapp_number_id: nextIds.includes(String(user.default_whatsapp_number_id))
+                                        ? user.default_whatsapp_number_id
+                                        : nextIds[0] || null
+                                    }));
+                                  }}
+                                />
+                                <span>{getLineLabel(lines, line.id)}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    <label className="text-xs font-medium text-gray-600">
+                      Número principal
+                      <select
+                        value={user.default_whatsapp_number_id || ''}
+                        onChange={e => {
+                          const lineId = e.target.value || null;
+                          const mode = getLineAccessMode(user);
+                          const allowedIds = mode === 'fixed'
+                            ? (lineId ? [lineId] : [])
+                            : [...new Set([...getAllowedLineIds(user), lineId].filter(Boolean))];
+                          handleUpdateUser(user.id, buildAccessPatch(user, mode, {
+                            default_whatsapp_number_id: lineId,
+                            allowed_whatsapp_number_ids: allowedIds
+                          }));
+                        }}
+                        disabled={saving === `user-${user.id}` || lines.length === 0}
+                        className="mt-1 w-full border rounded-lg px-2 py-2 text-xs bg-white"
+                      >
+                        <option value="">Sin fijo</option>
+                        {lines.map(line => (
+                          <option key={line.id} value={line.id}>{getLineLabel(lines, line.id)}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap justify-end gap-2">
+                    {editingUserId === user.id ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleSaveUserProfile(user)}
+                          disabled={saving === `user-${user.id}`}
+                          className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                        >
+                          Guardar nombre
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingUserId(null)}
+                          className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                        >
+                          Cancelar
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingUserId(user.id);
+                          setUserDrafts(current => ({
+                            ...current,
+                            [user.id]: { name: user.name, email: user.email || '' }
+                          }));
+                        }}
+                        className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                      >
+                        Editar nombre
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleResetPassword(user)}
                       className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
                     >
                       Clave
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteUser(user)}
+                      disabled={user.id === agent?.id || (user.role === 'superadmin' && agent?.role !== 'superadmin') || saving === `delete-${user.id}`}
+                      className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      {saving === `delete-${user.id}` ? 'Eliminando...' : 'Eliminar'}
                     </button>
                   </div>
                 </div>

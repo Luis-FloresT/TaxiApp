@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
 const { cleanEnv } = require('../config/env');
+const { loadAgentAccess } = require('../services/agentLineAccess');
 
-const authMiddleware = (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -11,9 +12,16 @@ const authMiddleware = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, cleanEnv(process.env.JWT_SECRET, 'change_this_in_production'));
-    req.agent = decoded;
+    const agent = await loadAgentAccess(decoded.id);
+    if (!agent) {
+      return res.status(403).json({ error: 'Usuario inválido o inactivo' });
+    }
+    req.agent = agent;
     next();
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
     return res.status(403).json({ error: 'Token inválido o expirado' });
   }
 };

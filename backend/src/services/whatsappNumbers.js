@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { cleanEnv } = require('../config/env');
+const { canAdmin, getAllowedLineIds, normalizeAgentAccess } = require('./agentLineAccess');
 
 const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '');
 
@@ -144,7 +145,29 @@ const getWhatsAppNumberByPhoneNumberId = async (phoneNumberId, displayPhoneNumbe
   return result.rows[0];
 };
 
-const listWhatsAppNumbers = async () => {
+const listWhatsAppNumbers = async (agent = null) => {
+  const currentAgent = agent ? normalizeAgentAccess(agent) : null;
+
+  if (currentAgent && !canAdmin(currentAgent.role) && !currentAgent.can_view_all_numbers) {
+    const allowedIds = await getAllowedLineIds(currentAgent);
+
+    if (allowedIds.length === 0) return [];
+
+    const result = await pool.query(
+      `SELECT id, label, phone_number_id, display_phone_number, is_default, active
+       FROM whatsapp_numbers
+       WHERE active = true AND id = ANY($1::int[])
+       ORDER BY
+         CASE WHEN id = $2 THEN 0 ELSE 1 END,
+         is_default DESC,
+         label ASC,
+         id ASC`,
+      [allowedIds, currentAgent.default_whatsapp_number_id]
+    );
+
+    return result.rows;
+  }
+
   const result = await pool.query(
     `SELECT id, label, phone_number_id, display_phone_number, is_default, active
      FROM whatsapp_numbers
