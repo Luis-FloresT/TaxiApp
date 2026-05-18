@@ -21,6 +21,7 @@ const rideStatusConfig = {
 
 const allowedRideStatuses = Object.keys(rideStatusConfig);
 const terminalRideStatuses = ['completed', 'cancelled'];
+const canAdmin = (role) => ['admin', 'superadmin'].includes(role);
 
 const upsertDriverChat = async ({ driverPhone, driverName, vehicleLabel, dispatchText, sourceChat }) => {
   const fallbackName = driverName || `Taxista +${driverPhone}`;
@@ -431,7 +432,7 @@ router.delete('/bulk/customers', async (req, res) => {
     week: "NOW() - INTERVAL '7 days'"
   };
 
-  if (req.agent?.role !== 'admin') {
+  if (!canAdmin(req.agent?.role)) {
     return res.status(403).json({ error: 'Solo un administrador puede borrar chats en lote' });
   }
 
@@ -477,7 +478,7 @@ router.delete('/bulk/customers', async (req, res) => {
 router.delete('/:chatId', async (req, res) => {
   const { chatId } = req.params;
 
-  if (req.agent?.role !== 'admin') {
+  if (!canAdmin(req.agent?.role)) {
     return res.status(403).json({ error: 'Solo un administrador puede borrar chats' });
   }
 

@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 
 router.get('/summary', async (req, res) => {
-  if (req.agent?.role !== 'admin') {
+  if (!['admin', 'superadmin'].includes(req.agent?.role)) {
     return res.status(403).json({ error: 'Solo un administrador puede ver reportes' });
   }
 

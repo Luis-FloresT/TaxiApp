@@ -17,13 +17,15 @@ const emptyUser = {
   role: 'operator'
 };
 
+const isAdminRole = (role) => ['admin', 'superadmin'].includes(role);
+
 const emptyLine = {
   label: '',
   phoneNumberId: '',
   displayPhone: ''
 };
 
-const AdminPanel = ({ agent, onClose, onLinesChanged }) => {
+const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout, onOpenOperatorPanel }) => {
   const [tab, setTab] = useState('users');
   const [users, setUsers] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -119,15 +121,39 @@ const AdminPanel = ({ agent, onClose, onLinesChanged }) => {
   const totals = summary?.totals || {};
   const agentStats = summary?.agents || {};
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-30 z-50 flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-6xl max-h-[92vh] overflow-y-auto rounded-xl shadow-xl">
-        <div className="px-6 py-4 border-b flex items-center justify-between">
+  const panelContent = (
+    <div className={fullPage ? 'min-h-screen bg-gray-100' : ''}>
+      <div className={fullPage ? 'mx-auto w-full max-w-7xl bg-white min-h-screen' : 'bg-white w-full max-w-6xl max-h-[92vh] overflow-y-auto rounded-xl shadow-xl'}>
+        <div className="px-6 py-4 border-b flex items-center justify-between bg-white">
           <div>
-            <h2 className="text-lg font-semibold text-gray-800">Administración</h2>
-            <p className="text-sm text-gray-500">Usuarios, líneas de WhatsApp y estado operativo.</p>
+            <h2 className="text-xl font-semibold text-gray-800">Administración TaxiWhatsApp</h2>
+            <p className="text-sm text-gray-500">
+              {agent?.name} · {agent?.role === 'superadmin' ? 'Superusuario' : 'Administrador'}
+            </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl">×</button>
+          <div className="flex items-center gap-2">
+            {onOpenOperatorPanel && (
+              <button
+                type="button"
+                onClick={onOpenOperatorPanel}
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+              >
+                Panel operativo
+              </button>
+            )}
+            {onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                className="rounded-lg bg-gray-800 px-3 py-2 text-sm text-white hover:bg-gray-900"
+              >
+                Salir
+              </button>
+            )}
+            {onClose && !fullPage && (
+              <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl">×</button>
+            )}
+          </div>
         </div>
 
         <div className="border-b px-6 pt-3 flex flex-wrap gap-2">
@@ -193,6 +219,7 @@ const AdminPanel = ({ agent, onClose, onLinesChanged }) => {
               >
                 <option value="operator">Operador</option>
                 <option value="admin">Admin</option>
+                {agent?.role === 'superadmin' && <option value="superadmin">Superadmin</option>}
               </select>
               <button
                 disabled={saving === 'user'}
@@ -215,18 +242,25 @@ const AdminPanel = ({ agent, onClose, onLinesChanged }) => {
                     <p className="font-medium text-gray-800">{user.name}</p>
                     <p className="text-xs text-gray-500">@{user.username}{user.email ? ` · ${user.email}` : ''}</p>
                   </div>
-                  <select
-                    value={user.role}
-                    onChange={e => handleUpdateUser(user.id, { role: e.target.value })}
-                    disabled={saving === `user-${user.id}`}
-                    className="w-fit border rounded-lg px-2 py-1 text-xs bg-white"
-                  >
-                    <option value="operator">Operador</option>
-                    <option value="admin">Admin</option>
-                  </select>
+                  {user.role === 'superadmin' && agent?.role !== 'superadmin' ? (
+                    <span className="w-fit rounded-lg bg-purple-50 px-2 py-1 text-xs text-purple-700">
+                      Superadmin
+                    </span>
+                  ) : (
+                    <select
+                      value={user.role}
+                      onChange={e => handleUpdateUser(user.id, { role: e.target.value })}
+                      disabled={saving === `user-${user.id}`}
+                      className="w-fit border rounded-lg px-2 py-1 text-xs bg-white"
+                    >
+                      <option value="operator">Operador</option>
+                      <option value="admin">Admin</option>
+                      {agent?.role === 'superadmin' && <option value="superadmin">Superadmin</option>}
+                    </select>
+                  )}
                   <button
                     type="button"
-                    disabled={user.id === agent?.id || saving === `user-${user.id}`}
+                    disabled={user.id === agent?.id || (user.role === 'superadmin' && agent?.role !== 'superadmin') || saving === `user-${user.id}`}
                     onClick={() => handleUpdateUser(user.id, { active: !user.active })}
                     className={`w-fit rounded-full px-2 py-1 text-xs font-medium ${
                       user.active
@@ -359,6 +393,34 @@ const AdminPanel = ({ agent, onClose, onLinesChanged }) => {
           </div>
         )}
       </div>
+    </div>
+  );
+
+  if (fullPage) {
+    if (!isAdminRole(agent?.role)) {
+      return (
+        <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow p-6 max-w-md text-center">
+            <h1 className="text-xl font-semibold text-gray-800">Acceso restringido</h1>
+            <p className="text-sm text-gray-500 mt-2">Este panel es solo para administradores.</p>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="mt-4 rounded-lg bg-gray-800 px-4 py-2 text-sm text-white"
+            >
+              Salir
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return panelContent;
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-30 z-50 flex items-center justify-center p-4">
+      {panelContent}
     </div>
   );
 };

@@ -5,6 +5,7 @@ const { listWhatsAppNumbers } = require('../services/whatsappNumbers');
 const { cleanEnv } = require('../config/env');
 
 const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '');
+const canAdmin = (role) => ['admin', 'superadmin'].includes(role);
 
 router.get('/', async (req, res) => {
   try {
@@ -17,7 +18,7 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  if (req.agent?.role !== 'admin') {
+  if (!canAdmin(req.agent?.role)) {
     return res.status(403).json({ error: 'Solo un administrador puede agregar líneas' });
   }
 

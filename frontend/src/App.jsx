@@ -38,7 +38,6 @@ function App() {
   const [showDrivers, setShowDrivers] = useState(false);
   const [showReports, setShowReports] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false);
   const [whatsappNumbers, setWhatsappNumbers] = useState([]);
   const [selectedWhatsappNumberId, setSelectedWhatsappNumberId] = useState(() => {
     const savedAgent = readSavedAgent();
@@ -116,16 +115,30 @@ function App() {
 
   if (!agent) return <Login onLogin={handleLogin} />;
 
+  if (path === '/admin') {
+    return (
+      <AdminPanel
+        agent={agent}
+        fullPage
+        onLogout={handleLogout}
+        onOpenOperatorPanel={() => { window.location.href = '/'; }}
+        onLinesChanged={(lines) => {
+          setWhatsappNumbers(lines);
+          window.dispatchEvent(new Event('chats:refresh'));
+        }}
+      />
+    );
+  }
+
   return (
     <div className="h-screen flex flex-col bg-gray-100">
       <Header
         agent={agent}
         onLogout={handleLogout}
-        onBotConfig={agent.role === 'admin' ? () => setShowBotConfig(true) : null}
+        onBotConfig={null}
         onDrivers={() => setShowDrivers(true)}
-        onReports={agent.role === 'admin' ? () => setShowReports(true) : null}
-        onMaintenance={agent.role === 'admin' ? () => setShowMaintenance(true) : null}
-        onAdmin={agent.role === 'admin' ? () => setShowAdmin(true) : null}
+        onReports={null}
+        onMaintenance={null}
         whatsappNumbers={whatsappNumbers}
         selectedWhatsappNumberId={selectedWhatsappNumberId}
         onWhatsappNumberChange={handleWhatsappNumberChange}
@@ -175,16 +188,6 @@ function App() {
         <MaintenancePanel
           onClose={() => setShowMaintenance(false)}
           onBulkDeleted={handleBulkChatsDeleted}
-        />
-      )}
-      {showAdmin && (
-        <AdminPanel
-          agent={agent}
-          onClose={() => setShowAdmin(false)}
-          onLinesChanged={(lines) => {
-            setWhatsappNumbers(lines);
-            window.dispatchEvent(new Event('chats:refresh'));
-          }}
         />
       )}
     </div>

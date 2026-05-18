@@ -3,8 +3,11 @@ const router = express.Router();
 const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
 
+const adminRoles = ['admin', 'superadmin'];
+const allowedRoles = ['operator', 'admin', 'superadmin'];
+
 const requireAdmin = (req, res, next) => {
-  if (req.agent?.role !== 'admin') {
+  if (!adminRoles.includes(req.agent?.role)) {
     return res.status(403).json({ error: 'Solo un administrador puede gestionar usuarios' });
   }
 
@@ -35,7 +38,10 @@ router.post('/', async (req, res) => {
   const name = String(req.body?.name || '').trim();
   const username = String(req.body?.username || '').trim().toLowerCase();
   const email = String(req.body?.email || '').trim();
-  const role = req.body?.role === 'admin' ? 'admin' : 'operator';
+  const requestedRole = allowedRoles.includes(req.body?.role) ? req.body.role : 'operator';
+  const role = requestedRole === 'superadmin' && req.agent?.role !== 'superadmin'
+    ? 'admin'
+    : requestedRole;
   const password = String(req.body?.password || '');
 
   if (!name || !username || password.length < 6) {
@@ -65,7 +71,12 @@ router.patch('/:id', async (req, res) => {
   const targetId = Number(req.params.id);
   const name = req.body?.name === undefined ? null : String(req.body.name || '').trim();
   const email = req.body?.email === undefined ? null : String(req.body.email || '').trim();
-  const role = req.body?.role === undefined ? null : (req.body.role === 'admin' ? 'admin' : 'operator');
+  const requestedRole = req.body?.role === undefined
+    ? null
+    : (allowedRoles.includes(req.body.role) ? req.body.role : 'operator');
+  const role = requestedRole === 'superadmin' && req.agent?.role !== 'superadmin'
+    ? 'admin'
+    : requestedRole;
   const active = req.body?.active === undefined ? null : Boolean(req.body.active);
 
   if (targetId === req.agent?.id && active === false) {
@@ -73,6 +84,19 @@ router.patch('/:id', async (req, res) => {
   }
 
   try {
+    const targetResult = await pool.query(
+      'SELECT role FROM agents WHERE id = $1',
+      [targetId]
+    );
+
+    if (targetResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    if (targetResult.rows[0].role === 'superadmin' && req.agent?.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Solo un superadmin puede modificar otro superadmin' });
+    }
+
     const result = await pool.query(
       `UPDATE agents
        SET name = COALESCE(NULLIF($1, ''), name),

@@ -303,7 +303,7 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
   const idleMinutes = Number(chat.idle_minutes || 0);
   const isDriverChat = chat.contact_type === 'driver';
   const needsAttention = !isDriverChat && !isArchived && chat.status === 'pending' && idleMinutes >= 5;
-  const isAdmin = agent?.role === 'admin';
+  const isAdmin = ['admin', 'superadmin'].includes(agent?.role);
 
   const isBotMessage = (content) =>
     content?.includes('TaxiWhatsApp') ||

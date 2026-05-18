@@ -45,7 +45,8 @@ router.post('/login', async (req, res) => {
         name: agent.name,
         username: agent.username,
         email: agent.email,
-        role: agent.role || 'operator'
+        role: agent.role || 'operator',
+        is_admin: ['admin', 'superadmin'].includes(agent.role || 'operator')
       }
     });
   } catch (err) {

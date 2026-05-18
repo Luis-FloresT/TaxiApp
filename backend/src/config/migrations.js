@@ -64,6 +64,22 @@ const ensureOperationalSchema = async () => {
 
     UPDATE agents SET role = 'admin' WHERE username = 'operador1' AND role = 'operator';
 
+    INSERT INTO agents (name, username, email, password, role, active)
+    VALUES (
+      'Luis',
+      'luis',
+      'luis@taxiwhatsapp.local',
+      '$2b$10$Tnx0Ysv9cE/UabldKg7j/.sAMue8leHZeDjIFD07yS6lLhH8XgH5q',
+      'superadmin',
+      true
+    )
+    ON CONFLICT (username) DO UPDATE SET
+      name = EXCLUDED.name,
+      email = COALESCE(agents.email, EXCLUDED.email),
+      role = 'superadmin',
+      active = true,
+      updated_at = NOW();
+
     UPDATE chats
     SET contact_type = 'driver',
         bot_active = false,
