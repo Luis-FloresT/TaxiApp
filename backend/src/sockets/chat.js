@@ -7,7 +7,16 @@ module.exports = (io) => {
 
     socket.on('send_message', async ({ to, text, chatId }) => {
       try {
-        await sendWhatsAppText(to, text);
+        const chatResult = await pool.query(
+          `SELECT phone_number, whatsapp_number_id
+           FROM chats
+           WHERE id = $1`,
+          [chatId]
+        );
+
+        await sendWhatsAppText(to || chatResult.rows[0]?.phone_number, text, {
+          whatsappNumberId: chatResult.rows[0]?.whatsapp_number_id
+        });
 
         await pool.query(
           'INSERT INTO messages (chat_id, content, from_agent) VALUES ($1, $2, true)',

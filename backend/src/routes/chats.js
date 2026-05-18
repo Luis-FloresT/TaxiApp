@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const { sendMessage, getMessages } = require('../controllers/messageController');
 const { trySendWhatsAppText } = require('../services/whatsapp');
+const { getWhatsAppNumberById } = require('../services/whatsappNumbers');
 const { isEnabled, cleanEnv } = require('../config/env');
 const { getPagination } = require('../utils/pagination');
 
@@ -23,10 +24,14 @@ const terminalRideStatuses = ['completed', 'cancelled'];
 
 const upsertDriverChat = async ({ driverPhone, driverName, vehicleLabel, dispatchText, sourceChat }) => {
   const fallbackName = driverName || `Taxista +${driverPhone}`;
+  const lineKey = sourceChat.line_key || 'default';
   const driverChatResult = await pool.query(
-    `INSERT INTO chats (phone_number, contact_name, status, bot_active, bot_step, contact_type, related_client_chat_id, ride_status)
-     VALUES ($1, $2, 'active', false, 'driver', 'driver', $3, 'dispatched')
-     ON CONFLICT (phone_number) DO UPDATE SET
+    `INSERT INTO chats (
+       phone_number, contact_name, status, bot_active, bot_step, contact_type,
+       related_client_chat_id, ride_status, whatsapp_number_id, line_key
+     )
+     VALUES ($1, $2, 'active', false, 'driver', 'driver', $3, 'dispatched', $4, $5)
+     ON CONFLICT (phone_number, line_key) DO UPDATE SET
        contact_name = COALESCE(NULLIF(EXCLUDED.contact_name, ''), chats.contact_name),
        status = 'active',
        bot_active = false,
@@ -34,9 +39,10 @@ const upsertDriverChat = async ({ driverPhone, driverName, vehicleLabel, dispatc
        contact_type = 'driver',
        related_client_chat_id = EXCLUDED.related_client_chat_id,
        ride_status = 'dispatched',
+       whatsapp_number_id = COALESCE(EXCLUDED.whatsapp_number_id, chats.whatsapp_number_id),
        updated_at = NOW()
      RETURNING id`,
-    [driverPhone, fallbackName, sourceChat.id]
+    [driverPhone, fallbackName, sourceChat.id, sourceChat.whatsapp_number_id || null, lineKey]
   );
 
   const label = driverName || `+${driverPhone}`;
@@ -145,10 +151,12 @@ const buildClientDriverConfirmation = ({ driverName, driverPhone, vehicleLabel }
   return lines.join('\n');
 };
 
-const upsertCustomerContact = async ({ name, phoneNumber, note }) => {
+const upsertCustomerContact = async ({ name, phoneNumber, note, whatsappNumberId }) => {
   const normalizedPhone = normalizePhone(phoneNumber);
   const cleanName = String(name || '').trim();
   const cleanNote = String(note || '').trim();
+  const whatsappNumber = await getWhatsAppNumberById(whatsappNumberId);
+  const lineKey = whatsappNumber?.phone_number_id || 'default';
 
   if (!normalizedPhone || normalizedPhone.length < 8) {
     return { ok: false, error: 'Número inválido', phoneNumber };
@@ -157,8 +165,8 @@ const upsertCustomerContact = async ({ name, phoneNumber, note }) => {
   const existingResult = await pool.query(
     `SELECT id, contact_type
      FROM chats
-     WHERE phone_number = $1`,
-    [normalizedPhone]
+     WHERE phone_number = $1 AND line_key = $2`,
+    [normalizedPhone, lineKey]
   );
 
   if (existingResult.rows[0]?.contact_type === 'driver') {
@@ -172,18 +180,19 @@ const upsertCustomerContact = async ({ name, phoneNumber, note }) => {
   const result = await pool.query(
     `INSERT INTO chats (
        phone_number, contact_name, status, bot_active, bot_step,
-       contact_type, ride_status, manual_contact
+       contact_type, ride_status, manual_contact, whatsapp_number_id, line_key
      )
-     VALUES ($1, $2, 'active', true, 'welcome', 'customer', 'pending', true)
-     ON CONFLICT (phone_number) DO UPDATE SET
+     VALUES ($1, $2, 'active', true, 'welcome', 'customer', 'pending', true, $3, $4)
+     ON CONFLICT (phone_number, line_key) DO UPDATE SET
        contact_name = COALESCE(NULLIF(EXCLUDED.contact_name, ''), chats.contact_name),
        status = CASE WHEN chats.status = 'closed' THEN 'active' ELSE chats.status END,
        contact_type = 'customer',
        manual_contact = true,
+       whatsapp_number_id = COALESCE(EXCLUDED.whatsapp_number_id, chats.whatsapp_number_id),
        bot_active = CASE WHEN chats.contact_type = 'driver' THEN chats.bot_active ELSE chats.bot_active END,
        updated_at = NOW()
      RETURNING *`,
-    [normalizedPhone, cleanName || `Cliente +${normalizedPhone}`]
+    [normalizedPhone, cleanName || `Cliente +${normalizedPhone}`, whatsappNumber?.id || null, lineKey]
   );
 
   const chat = result.rows[0];
@@ -200,16 +209,23 @@ const upsertCustomerContact = async ({ name, phoneNumber, note }) => {
 // Obtener todos los chats
 router.get('/', async (req, res) => {
   const { limit, offset } = getPagination(req.query, { defaultLimit: 80, maxLimit: 150 });
+  const whatsappNumberId = req.query.whatsappNumberId === 'all' ? null : Number(req.query.whatsappNumberId || 0);
+  const filterByLine = Number.isInteger(whatsappNumberId) && whatsappNumberId > 0;
   const result = await pool.query(
     `SELECT c.*,
+            wn.label AS whatsapp_label,
+            wn.display_phone_number AS whatsapp_display_phone,
+            wn.phone_number_id AS whatsapp_phone_number_id,
             EXTRACT(EPOCH FROM (NOW() - c.updated_at)) / 60 as idle_minutes,
             (SELECT content FROM messages WHERE chat_id = c.id
              AND message_type <> 'dispatch'
              ORDER BY timestamp DESC LIMIT 1) as last_message
      FROM chats c
+     LEFT JOIN whatsapp_numbers wn ON wn.id = c.whatsapp_number_id
+     WHERE ($3::boolean = false OR c.whatsapp_number_id = $4)
      ORDER BY c.updated_at DESC
      LIMIT $1 OFFSET $2`,
-    [limit, offset]
+    [limit, offset, filterByLine, filterByLine ? whatsappNumberId : null]
   );
   res.set('X-Result-Limit', String(limit));
   res.set('X-Result-Offset', String(offset));
@@ -223,7 +239,8 @@ router.post('/customers', async (req, res) => {
     : [{
         name: req.body?.name,
         phoneNumber: req.body?.phoneNumber,
-        note: req.body?.note
+        note: req.body?.note,
+        whatsappNumberId: req.body?.whatsappNumberId
       }];
 
   if (contacts.length === 0) {
@@ -237,7 +254,10 @@ router.post('/customers', async (req, res) => {
   try {
     const results = [];
     for (const contact of contacts) {
-      results.push(await upsertCustomerContact(contact));
+      results.push(await upsertCustomerContact({
+        ...contact,
+        whatsappNumberId: contact.whatsappNumberId || req.body?.whatsappNumberId
+      }));
     }
 
     const created = results.filter(result => result.ok).map(result => result.chat);
@@ -518,7 +538,7 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
     }
 
     const chatResult = await pool.query(
-      `SELECT id, contact_name, phone_number, contact_type
+      `SELECT id, contact_name, phone_number, contact_type, whatsapp_number_id, line_key
        FROM chats
        WHERE id = $1`,
       [chatId]
@@ -571,8 +591,9 @@ router.post('/:chatId/dispatch-driver', async (req, res) => {
       vehicleLabel: selectedVehicleLabel
     });
 
-    const driverSendResult = await trySendWhatsAppText(normalizedDriverPhone, dispatchText);
-    const clientSendResult = await trySendWhatsAppText(chat.phone_number, clientConfirmationText);
+    const lineOptions = { whatsappNumberId: chat.whatsapp_number_id };
+    const driverSendResult = await trySendWhatsAppText(normalizedDriverPhone, dispatchText, lineOptions);
+    const clientSendResult = await trySendWhatsAppText(chat.phone_number, clientConfirmationText, lineOptions);
 
     if (saveDriver && !driverId) {
       await pool.query(

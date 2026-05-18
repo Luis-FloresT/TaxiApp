@@ -10,9 +10,23 @@ CREATE TABLE IF NOT EXISTS agents (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS whatsapp_numbers (
+  id SERIAL PRIMARY KEY,
+  label VARCHAR(120) NOT NULL,
+  phone_number_id VARCHAR(120) NOT NULL UNIQUE,
+  display_phone_number VARCHAR(32),
+  access_token TEXT,
+  is_default BOOLEAN NOT NULL DEFAULT false,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS chats (
   id SERIAL PRIMARY KEY,
-  phone_number VARCHAR(32) NOT NULL UNIQUE,
+  phone_number VARCHAR(32) NOT NULL,
+  whatsapp_number_id INTEGER REFERENCES whatsapp_numbers(id) ON DELETE SET NULL,
+  line_key VARCHAR(120) NOT NULL DEFAULT 'default',
   contact_name VARCHAR(160),
   status VARCHAR(24) NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'active', 'closed')),
@@ -100,7 +114,18 @@ ALTER TABLE agents ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+ALTER TABLE whatsapp_numbers ADD COLUMN IF NOT EXISTS label VARCHAR(120);
+ALTER TABLE whatsapp_numbers ADD COLUMN IF NOT EXISTS phone_number_id VARCHAR(120);
+ALTER TABLE whatsapp_numbers ADD COLUMN IF NOT EXISTS display_phone_number VARCHAR(32);
+ALTER TABLE whatsapp_numbers ADD COLUMN IF NOT EXISTS access_token TEXT;
+ALTER TABLE whatsapp_numbers ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE whatsapp_numbers ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE whatsapp_numbers ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE whatsapp_numbers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS phone_number VARCHAR(32);
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS whatsapp_number_id INTEGER REFERENCES whatsapp_numbers(id) ON DELETE SET NULL;
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS line_key VARCHAR(120) NOT NULL DEFAULT 'default';
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS contact_name VARCHAR(160);
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS status VARCHAR(24) NOT NULL DEFAULT 'pending';
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS assigned_agent_id INTEGER;
@@ -162,7 +187,10 @@ ALTER TABLE driver_contacts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT 
 ALTER TABLE driver_contacts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_username_unique ON agents(username);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_chats_phone_number_unique ON chats(phone_number);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_whatsapp_numbers_phone_id_unique ON whatsapp_numbers(phone_number_id);
+ALTER TABLE chats DROP CONSTRAINT IF EXISTS chats_phone_number_key;
+DROP INDEX IF EXISTS idx_chats_phone_number_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chats_phone_line_unique ON chats(phone_number, line_key);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_message_id_unique ON messages(wa_message_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_quick_replies_title_category_unique ON quick_replies(title, category);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_menu_option_number_unique ON bot_menu(option_number);
@@ -171,6 +199,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_driver_contacts_phone_unique ON driver_con
 CREATE INDEX IF NOT EXISTS idx_chats_status ON chats(status);
 CREATE INDEX IF NOT EXISTS idx_chats_ride_status ON chats(ride_status);
 CREATE INDEX IF NOT EXISTS idx_chats_contact_type ON chats(contact_type);
+CREATE INDEX IF NOT EXISTS idx_chats_whatsapp_number ON chats(whatsapp_number_id);
+CREATE INDEX IF NOT EXISTS idx_chats_line_key ON chats(line_key);
 CREATE INDEX IF NOT EXISTS idx_chats_assigned_driver_phone ON chats(assigned_driver_phone);
 CREATE INDEX IF NOT EXISTS idx_chats_related_client_chat ON chats(related_client_chat_id);
 CREATE INDEX IF NOT EXISTS idx_chats_manual_contact ON chats(manual_contact);
@@ -200,6 +230,11 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS set_chats_updated_at ON chats;
 CREATE TRIGGER set_chats_updated_at
 BEFORE UPDATE ON chats
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS set_whatsapp_numbers_updated_at ON whatsapp_numbers;
+CREATE TRIGGER set_whatsapp_numbers_updated_at
+BEFORE UPDATE ON whatsapp_numbers
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS set_quick_replies_updated_at ON quick_replies;

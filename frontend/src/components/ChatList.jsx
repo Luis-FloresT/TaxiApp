@@ -12,7 +12,7 @@ const rideLabels = {
   cancelled: 'Cancelada'
 };
 
-const ChatList = ({ onSelectChat, selectedChatId }) => {
+const ChatList = ({ onSelectChat, selectedChatId, selectedWhatsappNumberId = 'all' }) => {
   const [chats, setChats] = useState([]);
   const [filter, setFilter] = useState('all');
   const [hasMore, setHasMore] = useState(false);
@@ -28,7 +28,11 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
     let active = true;
 
     const loadChats = () => {
-      getChats({ limit: pageSize, offset: 0 })
+      getChats({
+        limit: pageSize,
+        offset: 0,
+        whatsappNumberId: selectedWhatsappNumberId
+      })
         .then(res => {
           if (!active) return;
           setHasMore(res.headers['x-has-more'] === 'true');
@@ -54,7 +58,7 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
       socket.off('chat_deleted', handleNewMessage);
       window.removeEventListener('chats:refresh', handleNewMessage);
     };
-  }, []);
+  }, [selectedWhatsappNumberId]);
 
   const openChats = chats.filter(chat => chat.status !== 'closed');
   const visibleChats = chats.filter(chat => {
@@ -98,8 +102,8 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
     setSavingContact(true);
 
     const payload = bulkContacts.trim()
-      ? { contacts: parseBulkContacts() }
-      : { name: contactName, phoneNumber: contactPhone };
+      ? { contacts: parseBulkContacts(), whatsappNumberId: selectedWhatsappNumberId === 'all' ? null : selectedWhatsappNumberId }
+      : { name: contactName, phoneNumber: contactPhone, whatsappNumberId: selectedWhatsappNumberId === 'all' ? null : selectedWhatsappNumberId };
 
     try {
       const response = await createCustomerContacts(payload);
@@ -284,6 +288,11 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
                   <p className="text-xs text-gray-500 truncate mt-0.5">
                     +{chat.phone_number}
                   </p>
+                  {chat.whatsapp_label && (
+                    <p className="text-[11px] text-green-600 truncate mt-0.5">
+                      Línea: {chat.whatsapp_label}
+                    </p>
+                  )}
                   <p className="text-xs text-gray-400 truncate mt-0.5">
                     {chat.last_message || 'Sin mensajes'}
                   </p>
@@ -329,7 +338,11 @@ const ChatList = ({ onSelectChat, selectedChatId }) => {
             <button
               type="button"
               onClick={() => {
-                getChats({ limit: pageSize, offset: chats.length })
+                getChats({
+                  limit: pageSize,
+                  offset: chats.length,
+                  whatsappNumberId: selectedWhatsappNumberId
+                })
                   .then(res => {
                     setHasMore(res.headers['x-has-more'] === 'true');
                     setChats(current => [...current, ...res.data]);

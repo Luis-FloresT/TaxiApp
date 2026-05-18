@@ -103,9 +103,13 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
   }, [chat.id]);
 
   useEffect(() => {
-    setIsArchived(chat.status === 'closed');
-    setBotActive(chat.bot_active ?? true);
-    setRideStatus(chat.ride_status || 'pending');
+    const syncChatState = window.setTimeout(() => {
+      setIsArchived(chat.status === 'closed');
+      setBotActive(chat.bot_active ?? true);
+      setRideStatus(chat.ride_status || 'pending');
+    }, 0);
+
+    return () => window.clearTimeout(syncChatState);
   }, [chat.id, chat.status, chat.bot_active, chat.ride_status]);
 
   useEffect(() => {
@@ -361,6 +365,12 @@ const ChatWindow = ({ chat, agent, onChatDeleted, onChatUpdated }) => {
           <div>
             <p className="font-semibold text-gray-800">{chat.contact_name || 'Desconocido'}</p>
             <p className="text-xs text-gray-500">+{chat.phone_number}</p>
+            {chat.whatsapp_label && (
+              <p className="text-xs text-green-600">
+                Línea: {chat.whatsapp_label}
+                {chat.whatsapp_display_phone ? ` · +${chat.whatsapp_display_phone}` : ''}
+              </p>
+            )}
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
               {isDriverChat ? (
                 <span className="inline-flex rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">

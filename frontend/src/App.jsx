@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Header from './components/Header';
 import ChatList from './components/ChatList';
 import ChatWindow from './components/ChatWindow';
@@ -9,29 +9,57 @@ import LegalPage from './components/LegalPage';
 import DriversPanel from './components/DriversPanel';
 import ReportsPanel from './components/ReportsPanel';
 import MaintenancePanel from './components/MaintenancePanel';
+import { getWhatsAppNumbers } from './services/api';
+
+const lineStorageKey = (username) => `selectedWhatsappNumberId:${username || 'default'}`;
+
+const readSavedAgent = () => {
+  const savedAgent = localStorage.getItem('agent');
+  const token = localStorage.getItem('token');
+
+  if (!savedAgent || !token) return null;
+
+  try {
+    return JSON.parse(savedAgent);
+  } catch {
+    localStorage.removeItem('agent');
+    localStorage.removeItem('token');
+    return null;
+  }
+};
 
 function App() {
   const simulatorEnabled = import.meta.env.VITE_ENABLE_SIMULATOR === 'true' || import.meta.env.DEV;
   const path = window.location.pathname;
   const [selectedChat, setSelectedChat] = useState(null);
-  const [agent, setAgent] = useState(() => {
-    const savedAgent = localStorage.getItem('agent');
-    const token = localStorage.getItem('token');
-
-    if (!savedAgent || !token) return null;
-
-    try {
-      return JSON.parse(savedAgent);
-    } catch {
-      localStorage.removeItem('agent');
-      localStorage.removeItem('token');
-      return null;
-    }
-  });
+  const [agent, setAgent] = useState(readSavedAgent);
   const [showBotConfig, setShowBotConfig] = useState(false);
   const [showDrivers, setShowDrivers] = useState(false);
   const [showReports, setShowReports] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
+  const [whatsappNumbers, setWhatsappNumbers] = useState([]);
+  const [selectedWhatsappNumberId, setSelectedWhatsappNumberId] = useState(() => {
+    const savedAgent = readSavedAgent();
+    return (
+      localStorage.getItem(lineStorageKey(savedAgent?.username)) ||
+      localStorage.getItem('selectedWhatsappNumberId') ||
+      'all'
+    );
+  });
+
+  useEffect(() => {
+    if (!agent) return;
+
+    getWhatsAppNumbers()
+      .then(res => {
+        setWhatsappNumbers(res.data);
+        if (selectedWhatsappNumberId !== 'all') {
+          const exists = res.data.some(item => String(item.id) === String(selectedWhatsappNumberId));
+          if (!exists) setSelectedWhatsappNumberId('all');
+        }
+      })
+      .catch(error => console.error('Error cargando líneas de WhatsApp:', error));
+  }, [agent, selectedWhatsappNumberId]);
 
   if (['/privacy', '/terms', '/data-deletion'].includes(path)) {
     return <LegalPage path={path} />;
@@ -41,13 +69,30 @@ function App() {
     return <Simulator />;
   }
 
-  const handleLogin = (agentData) => setAgent(agentData);
+  const handleLogin = (agentData) => {
+    setAgent(agentData);
+    setSelectedWhatsappNumberId(
+      localStorage.getItem(lineStorageKey(agentData.username)) ||
+      localStorage.getItem('selectedWhatsappNumberId') ||
+      'all'
+    );
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('agent');
     setAgent(null);
     setSelectedChat(null);
+  };
+
+  const handleWhatsappNumberChange = (value) => {
+    setSelectedWhatsappNumberId(value);
+    localStorage.setItem('selectedWhatsappNumberId', value);
+    if (agent?.username) {
+      localStorage.setItem(lineStorageKey(agent.username), value);
+    }
+    setSelectedChat(null);
+    window.dispatchEvent(new Event('chats:refresh'));
   };
 
   const handleChatDeleted = (chatId) => {
@@ -78,11 +123,15 @@ function App() {
         onDrivers={() => setShowDrivers(true)}
         onReports={agent.role === 'admin' ? () => setShowReports(true) : null}
         onMaintenance={agent.role === 'admin' ? () => setShowMaintenance(true) : null}
+        whatsappNumbers={whatsappNumbers}
+        selectedWhatsappNumberId={selectedWhatsappNumberId}
+        onWhatsappNumberChange={handleWhatsappNumberChange}
       />
       <div className="flex flex-1 overflow-hidden">
         <ChatList
           onSelectChat={setSelectedChat}
           selectedChatId={selectedChat?.id}
+          selectedWhatsappNumberId={selectedWhatsappNumberId}
         />
         {selectedChat ? (
           <ChatWindow

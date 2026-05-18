@@ -1,4 +1,3 @@
-const axios = require('axios');
 require('dotenv').config();
 
 const driverCommands = [
@@ -24,7 +23,8 @@ const detectDriverCommand = (text) =>
 
 const findActiveRideForDriver = async (pool, phoneNumber) => {
   const assignedRideResult = await pool.query(
-    `SELECT id, contact_name, phone_number, assigned_driver_name, assigned_driver_phone
+    `SELECT id, contact_name, phone_number, assigned_driver_name, assigned_driver_phone,
+            whatsapp_number_id
      FROM chats
      WHERE assigned_driver_phone = $1
        AND status <> 'closed'
@@ -63,12 +63,16 @@ const getIncomingContactRole = async (pool, phoneNumber) => {
     : 'customer';
 };
 
-const upsertIncomingChat = async ({ pool, from, contactName, contactType }) => {
+const upsertIncomingChat = async ({ pool, from, contactName, contactType, whatsappNumber }) => {
   const isDriver = contactType === 'driver';
+  const lineKey = whatsappNumber?.phone_number_id || 'default';
   const result = await pool.query(
-    `INSERT INTO chats (phone_number, contact_name, status, bot_active, bot_step, contact_type)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (phone_number) DO UPDATE SET
+    `INSERT INTO chats (
+       phone_number, contact_name, status, bot_active, bot_step, contact_type,
+       whatsapp_number_id, line_key
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (phone_number, line_key) DO UPDATE SET
        contact_name = CASE
          WHEN NULLIF(EXCLUDED.contact_name, '') IS NULL THEN chats.contact_name
          WHEN LOWER(EXCLUDED.contact_name) IN ('desconocido', 'unknown') THEN chats.contact_name
@@ -92,15 +96,18 @@ const upsertIncomingChat = async ({ pool, from, contactName, contactType }) => {
          WHEN chats.contact_type = 'driver' OR EXCLUDED.contact_type = 'driver' THEN 'driver'
          ELSE chats.bot_step
        END,
+       whatsapp_number_id = COALESCE(EXCLUDED.whatsapp_number_id, chats.whatsapp_number_id),
        updated_at = NOW()
-     RETURNING id, contact_type, ride_status`,
+     RETURNING id, contact_type, ride_status, whatsapp_number_id, line_key`,
     [
       from,
       contactName,
       isDriver ? 'active' : 'pending',
       !isDriver,
       isDriver ? 'driver' : 'welcome',
-      contactType
+      contactType,
+      whatsappNumber?.id || null,
+      lineKey
     ]
   );
 
@@ -143,13 +150,23 @@ const reopenCustomerBotAfterRide = async (pool, chatId) => {
 };
 
 const processJob = async (data) => {
-  const { from, text, waMessageId, contactName, locationData, messageType } = data;
+  const {
+    from, text, waMessageId, contactName, locationData, messageType,
+    businessPhoneNumberId, businessDisplayPhone
+  } = data;
   const pool = require('../config/db');
   const { processMessage } = require('../bot/chatbot');
   const { trySendWhatsAppText } = require('../services/whatsapp');
+  const {
+    getDefaultWhatsAppNumber,
+    getWhatsAppNumberByPhoneNumberId
+  } = require('../services/whatsappNumbers');
 
+  const whatsappNumber = businessPhoneNumberId
+    ? await getWhatsAppNumberByPhoneNumberId(businessPhoneNumberId, businessDisplayPhone)
+    : await getDefaultWhatsAppNumber();
   const contactType = await getIncomingContactRole(pool, from);
-  const chat = await upsertIncomingChat({ pool, from, contactName, contactType });
+  const chat = await upsertIncomingChat({ pool, from, contactName, contactType, whatsappNumber });
   const chatId = chat.id;
 
   if (contactType === 'customer' && terminalRideStatuses.includes(chat.ride_status)) {
@@ -197,7 +214,8 @@ const processJob = async (data) => {
         const driverName = assignedRide.assigned_driver_name || 'El taxista';
         await trySendWhatsAppText(
           assignedRide.phone_number,
-          `${driverName} confirmó la carrera y estará allá en breve.`
+          `${driverName} confirmó la carrera y estará allá en breve.`,
+          { whatsappNumberId: assignedRide.whatsapp_number_id }
         );
       }
 
@@ -264,7 +282,8 @@ const processJob = async (data) => {
         const driverName = ride.assigned_driver_name || 'El taxista';
         await trySendWhatsAppText(
           ride.phone_number,
-          `${driverName} confirmó la carrera y estará allá en breve.`
+          `${driverName} confirmó la carrera y estará allá en breve.`,
+          { whatsappNumberId: ride.whatsapp_number_id }
         );
       }
 
@@ -294,26 +313,7 @@ const processJob = async (data) => {
       [chatId, botResponse]
     );
 
-    if (process.env.WA_ACCESS_TOKEN !== 'pending') {
-      try {
-        await axios.post(
-          `https://graph.facebook.com/v18.0/${process.env.WA_PHONE_ID}/messages`,
-          {
-            messaging_product: 'whatsapp',
-            to: from,
-            type: 'text',
-            text: { body: botResponse }
-          },
-          {
-            headers: { Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` }
-          }
-        );
-      } catch (err) {
-        console.log('📤 [SIMULADO] Bot responde:', botResponse);
-      }
-    } else {
-      console.log('📤 [SIMULADO] Bot responde:', botResponse);
-    }
+    await trySendWhatsAppText(from, botResponse, { whatsappNumberId: chat.whatsapp_number_id });
   }
 
   const { io } = require('../../index');

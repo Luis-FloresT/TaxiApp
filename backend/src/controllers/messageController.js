@@ -6,7 +6,20 @@ const sendMessage = async (req, res) => {
   const { to, text, chatId } = req.body;
 
   try {
-    await sendWhatsAppText(to, text);
+    const chatResult = await pool.query(
+      `SELECT phone_number, whatsapp_number_id
+       FROM chats
+       WHERE id = $1`,
+      [chatId]
+    );
+
+    if (chatResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Chat no encontrado' });
+    }
+
+    await sendWhatsAppText(to || chatResult.rows[0].phone_number, text, {
+      whatsappNumberId: chatResult.rows[0].whatsapp_number_id
+    });
 
     await pool.query(
       'INSERT INTO messages (chat_id, content, from_agent) VALUES ($1, $2, true)',

@@ -20,6 +20,7 @@ const receiveMessage = async (req, res) => {
     const change = entry?.changes?.[0];
     const message = change?.value?.messages?.[0];
     const contact = change?.value?.contacts?.[0];
+    const metadata = change?.value?.metadata || {};
 
     if (message) {
       let text = '';
@@ -74,6 +75,8 @@ const receiveMessage = async (req, res) => {
           waMessageId: message.id,
           contactName: contact?.profile?.name || 'Desconocido',
           timestamp: message.timestamp,
+          businessPhoneNumberId: metadata.phone_number_id,
+          businessDisplayPhone: metadata.display_phone_number,
           // Datos extra de ubicación
           locationData: message.type === 'location' ? message.location : null
         });

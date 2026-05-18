@@ -39,6 +39,8 @@ export const changePassword = (username, currentPassword, newPassword) =>
 
 export const getChats = (params = {}) => API.get('/chats', { params });
 export const createCustomerContacts = (data) => API.post('/chats/customers', data);
+export const getWhatsAppNumbers = () => API.get('/whatsapp-numbers');
+export const createWhatsAppNumber = (data) => API.post('/whatsapp-numbers', data);
 export const getMessages = (chatId, params = {}) => API.get(`/chats/${chatId}/messages`, { params });
 export const getChatHistory = (chatId) => API.get(`/chats/${chatId}/history`);
 export const updateRideStatus = (chatId, status) =>
