@@ -46,6 +46,7 @@ router.post('/', async (req, res) => {
     await pool.query(
       `UPDATE chats
        SET contact_type = 'driver',
+           phone_number = $1,
            bot_active = false,
            bot_step = 'driver',
            status = CASE WHEN status = 'closed' THEN status ELSE 'active' END,
@@ -72,6 +73,16 @@ router.patch('/:id', async (req, res) => {
   }
 
   try {
+    const currentResult = await pool.query(
+      'SELECT phone_number FROM driver_contacts WHERE id = $1 AND active = true',
+      [req.params.id]
+    );
+
+    if (currentResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Taxista no encontrado' });
+    }
+
+    const previousPhone = currentResult.rows[0].phone_number;
     const result = await pool.query(
       `UPDATE driver_contacts
        SET name = COALESCE($1, name),
@@ -90,24 +101,25 @@ router.patch('/:id', async (req, res) => {
       ]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Taxista no encontrado' });
-    }
-
     await pool.query(
       `UPDATE chats
        SET contact_type = 'driver',
+           phone_number = $1,
            bot_active = false,
            bot_step = 'driver',
            status = CASE WHEN status = 'closed' THEN status ELSE 'active' END,
            contact_name = COALESCE(NULLIF($2, ''), contact_name),
            updated_at = NOW()
-       WHERE phone_number = $1`,
-      [result.rows[0].phone_number, result.rows[0].name]
+       WHERE phone_number IN ($1, $3)`,
+      [result.rows[0].phone_number, result.rows[0].name, previousPhone]
     );
 
     res.json(result.rows[0]);
   } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Ese celular ya está registrado para otro chofer' });
+    }
+
     console.error('❌ Error actualizando taxista:', error.message);
     res.status(500).json({ error: 'No se pudo actualizar el taxista' });
   }

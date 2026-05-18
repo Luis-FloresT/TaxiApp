@@ -41,6 +41,8 @@ export const getChats = (params = {}) => API.get('/chats', { params });
 export const createCustomerContacts = (data) => API.post('/chats/customers', data);
 export const getWhatsAppNumbers = () => API.get('/whatsapp-numbers');
 export const createWhatsAppNumber = (data) => API.post('/whatsapp-numbers', data);
+export const updateWhatsAppNumber = (id, data) => API.patch(`/whatsapp-numbers/${id}`, data);
+export const deleteWhatsAppNumber = (id) => API.delete(`/whatsapp-numbers/${id}`);
 export const getAgents = () => API.get('/agents');
 export const createAgent = (data) => API.post('/agents', data);
 export const updateAgent = (id, data) => API.patch(`/agents/${id}`, data);
@@ -52,6 +54,7 @@ export const updateRideStatus = (chatId, status) =>
   API.patch(`/chats/${chatId}/ride-status`, { status });
 export const archiveChat = (chatId) => API.patch(`/chats/${chatId}/archive`);
 export const restoreChat = (chatId) => API.patch(`/chats/${chatId}/restore`);
+export const updateChatContact = (chatId, data) => API.patch(`/chats/${chatId}/contact`, data);
 export const deleteChat = (chatId) => API.delete(`/chats/${chatId}`);
 export const bulkDeleteCustomerChats = (period, includeOpenRides = false) =>
   API.delete('/chats/bulk/customers', { data: { period, includeOpenRides } });

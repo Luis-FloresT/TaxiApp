@@ -456,6 +456,57 @@ router.patch('/:chatId/restore', async (req, res) => {
   }
 });
 
+router.patch('/:chatId/contact', async (req, res) => {
+  const { chatId } = req.params;
+  const name = req.body?.name === undefined ? null : String(req.body.name || '').trim();
+  const phoneNumber = req.body?.phoneNumber === undefined && req.body?.phone_number === undefined
+    ? null
+    : normalizePhone(req.body?.phoneNumber || req.body?.phone_number);
+  const status = req.body?.status === undefined ? null : String(req.body.status || '').trim();
+  const allowedStatuses = ['pending', 'active', 'closed'];
+
+  if (!canAdmin(req.agent?.role)) {
+    return res.status(403).json({ error: 'Solo un administrador puede editar contactos' });
+  }
+
+  if (status && !allowedStatuses.includes(status)) {
+    return res.status(400).json({ error: 'Estado de chat inválido' });
+  }
+
+  if (phoneNumber !== null && phoneNumber.length < 8) {
+    return res.status(400).json({ error: 'Número de celular inválido' });
+  }
+
+  try {
+    await assertCanAccessChat(req.agent, chatId);
+    const result = await pool.query(
+      `UPDATE chats
+       SET contact_name = COALESCE(NULLIF($1, ''), contact_name),
+           phone_number = COALESCE(NULLIF($2, ''), phone_number),
+           status = COALESCE($3, status),
+           updated_at = NOW()
+       WHERE id = $4
+       RETURNING *`,
+      [name, phoneNumber, status, chatId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Chat no encontrado' });
+    }
+
+    const { io } = require('../../index');
+    io.emit('chat_updated', { chatId: Number(chatId), ...result.rows[0] });
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    const isDuplicate = error.code === '23505';
+    console.error('❌ Error editando contacto:', error.message);
+    res.status(isDuplicate ? 409 : (error.status || 500)).json({
+      error: isDuplicate ? 'Ese número ya existe en esa línea' : (error.status ? error.message : 'No se pudo editar el contacto')
+    });
+  }
+});
+
 // Borrar chat y sus mensajes
 router.delete('/bulk/customers', async (req, res) => {
   const { period = 'today', includeOpenRides = false } = req.body || {};

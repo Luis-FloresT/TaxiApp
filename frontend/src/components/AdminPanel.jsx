@@ -2,13 +2,23 @@ import { useEffect, useState } from 'react';
 import {
   bulkDeleteCustomerChats,
   createAgent,
+  createCustomerContacts,
+  createDriver,
   createWhatsAppNumber,
   deleteAgent,
+  deleteChat,
+  deleteDriver,
+  deleteWhatsAppNumber,
   getAgents,
+  getChats,
+  getDrivers,
   getReportSummary,
   getWhatsAppNumbers,
   resetAgentPassword,
-  updateAgent
+  updateAgent,
+  updateChatContact,
+  updateDriver,
+  updateWhatsAppNumber
 } from '../services/api';
 
 const emptyUser = {
@@ -31,6 +41,25 @@ const emptyLine = {
   displayPhone: ''
 };
 
+const emptyDriver = {
+  name: '',
+  phoneNumber: '',
+  vehicleLabel: '',
+  availabilityStatus: 'available'
+};
+
+const emptyCustomer = {
+  name: '',
+  phoneNumber: '',
+  note: ''
+};
+
+const availabilityLabels = {
+  available: 'Disponible',
+  busy: 'Ocupado',
+  offline: 'Fuera de turno'
+};
+
 const getLineAccessMode = (user) => {
   if (user.can_view_all_numbers !== false) return 'all';
   return user.can_switch_numbers !== false ? 'assigned' : 'fixed';
@@ -47,21 +76,36 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
   const [users, setUsers] = useState([]);
   const [summary, setSummary] = useState(null);
   const [lines, setLines] = useState([]);
+  const [drivers, setDrivers] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [newUser, setNewUser] = useState(emptyUser);
   const [newLine, setNewLine] = useState(emptyLine);
+  const [newDriver, setNewDriver] = useState(emptyDriver);
+  const [newCustomer, setNewCustomer] = useState(emptyCustomer);
   const [saving, setSaving] = useState('');
   const [error, setError] = useState('');
   const [includeOpenRides, setIncludeOpenRides] = useState(false);
   const [editingUserId, setEditingUserId] = useState(null);
   const [userDrafts, setUserDrafts] = useState({});
+  const [lineDrafts, setLineDrafts] = useState({});
+  const [driverDrafts, setDriverDrafts] = useState({});
+  const [customerDrafts, setCustomerDrafts] = useState({});
 
   const loadAll = () => {
     setError('');
-    Promise.all([getAgents(), getReportSummary(), getWhatsAppNumbers()])
-      .then(([usersRes, summaryRes, linesRes]) => {
+    Promise.all([
+      getAgents(),
+      getReportSummary(),
+      getWhatsAppNumbers(),
+      getDrivers(),
+      getChats({ limit: 200, offset: 0, whatsappNumberId: 'all' })
+    ])
+      .then(([usersRes, summaryRes, linesRes, driversRes, chatsRes]) => {
         setUsers(usersRes.data);
         setSummary(summaryRes.data);
         setLines(linesRes.data);
+        setDrivers(driversRes.data);
+        setCustomers(chatsRes.data.filter(chat => chat.contact_type !== 'driver'));
       })
       .catch(err => setError(err.response?.data?.error || 'No se pudo cargar el panel admin'));
   };
@@ -199,6 +243,166 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
       onLinesChanged?.(res.data);
     } catch (err) {
       setError(err.response?.data?.error || 'No se pudo agregar la línea');
+    } finally {
+      setSaving('');
+    }
+  };
+
+  const handleUpdateLine = async (line) => {
+    const draft = lineDrafts[line.id] || line;
+    setSaving(`line-${line.id}`);
+    setError('');
+
+    try {
+      await updateWhatsAppNumber(line.id, {
+        label: draft.label,
+        phoneNumberId: draft.phone_number_id,
+        displayPhone: draft.display_phone_number,
+        isDefault: draft.is_default
+      });
+      const res = await getWhatsAppNumbers();
+      setLines(res.data);
+      onLinesChanged?.(res.data);
+      setLineDrafts({});
+      window.dispatchEvent(new Event('chats:refresh'));
+    } catch (err) {
+      setError(err.response?.data?.error || 'No se pudo actualizar la línea');
+    } finally {
+      setSaving('');
+    }
+  };
+
+  const handleDeleteLine = async (line) => {
+    const ok = confirm(`¿Desactivar la línea ${line.label}?\n\nNo se borrarán chats históricos, pero ya no aparecerá para trabajar.`);
+    if (!ok) return;
+
+    setSaving(`delete-line-${line.id}`);
+    setError('');
+
+    try {
+      await deleteWhatsAppNumber(line.id);
+      const res = await getWhatsAppNumbers();
+      setLines(res.data);
+      onLinesChanged?.(res.data);
+      window.dispatchEvent(new Event('chats:refresh'));
+    } catch (err) {
+      setError(err.response?.data?.error || 'No se pudo desactivar la línea');
+    } finally {
+      setSaving('');
+    }
+  };
+
+  const handleCreateDriver = async (event) => {
+    event.preventDefault();
+    setSaving('driver');
+    setError('');
+
+    try {
+      await createDriver(newDriver);
+      setNewDriver(emptyDriver);
+      const res = await getDrivers();
+      setDrivers(res.data);
+      window.dispatchEvent(new Event('chats:refresh'));
+    } catch (err) {
+      setError(err.response?.data?.error || 'No se pudo guardar el chofer');
+    } finally {
+      setSaving('');
+    }
+  };
+
+  const handleUpdateDriver = async (driver) => {
+    const draft = driverDrafts[driver.id] || driver;
+    setSaving(`driver-${driver.id}`);
+    setError('');
+
+    try {
+      const res = await updateDriver(driver.id, {
+        name: draft.name,
+        phoneNumber: draft.phone_number,
+        vehicleLabel: draft.vehicle_label,
+        availabilityStatus: draft.availability_status
+      });
+      setDrivers(current => current.map(item => (item.id === driver.id ? res.data : item)));
+      setDriverDrafts(current => ({ ...current, [driver.id]: res.data }));
+      window.dispatchEvent(new Event('chats:refresh'));
+    } catch (err) {
+      setError(err.response?.data?.error || 'No se pudo actualizar el chofer');
+    } finally {
+      setSaving('');
+    }
+  };
+
+  const handleDeleteDriver = async (driver) => {
+    const ok = confirm(`¿Desactivar a ${driver.name || driver.phone_number}?`);
+    if (!ok) return;
+
+    setSaving(`delete-driver-${driver.id}`);
+    setError('');
+
+    try {
+      await deleteDriver(driver.id);
+      setDrivers(current => current.filter(item => item.id !== driver.id));
+      window.dispatchEvent(new Event('chats:refresh'));
+    } catch (err) {
+      setError(err.response?.data?.error || 'No se pudo desactivar el chofer');
+    } finally {
+      setSaving('');
+    }
+  };
+
+  const handleCreateCustomer = async (event) => {
+    event.preventDefault();
+    setSaving('customer');
+    setError('');
+
+    try {
+      await createCustomerContacts(newCustomer);
+      setNewCustomer(emptyCustomer);
+      const res = await getChats({ limit: 200, offset: 0, whatsappNumberId: 'all' });
+      setCustomers(res.data.filter(chat => chat.contact_type !== 'driver'));
+      window.dispatchEvent(new Event('chats:refresh'));
+    } catch (err) {
+      const detail = err.response?.data?.errors?.[0]?.error || err.response?.data?.error;
+      setError(detail || 'No se pudo guardar el cliente');
+    } finally {
+      setSaving('');
+    }
+  };
+
+  const handleUpdateCustomer = async (customer) => {
+    const draft = customerDrafts[customer.id] || customer;
+    setSaving(`customer-${customer.id}`);
+    setError('');
+
+    try {
+      const res = await updateChatContact(customer.id, {
+        name: draft.contact_name,
+        phoneNumber: draft.phone_number,
+        status: draft.status
+      });
+      setCustomers(current => current.map(item => (item.id === customer.id ? res.data : item)));
+      setCustomerDrafts(current => ({ ...current, [customer.id]: res.data }));
+      window.dispatchEvent(new Event('chats:refresh'));
+    } catch (err) {
+      setError(err.response?.data?.error || 'No se pudo actualizar el cliente');
+    } finally {
+      setSaving('');
+    }
+  };
+
+  const handleDeleteCustomer = async (customer) => {
+    const ok = confirm(`¿Borrar el chat de ${customer.contact_name || customer.phone_number}?\n\nEsto elimina el historial de mensajes de ese cliente.`);
+    if (!ok) return;
+
+    setSaving(`delete-customer-${customer.id}`);
+    setError('');
+
+    try {
+      await deleteChat(customer.id);
+      setCustomers(current => current.filter(item => item.id !== customer.id));
+      window.dispatchEvent(new Event('chats:refresh'));
+    } catch (err) {
+      setError(err.response?.data?.error || 'No se pudo borrar el cliente');
     } finally {
       setSaving('');
     }
@@ -343,6 +547,8 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
         <div className="border-b px-6 pt-3 flex flex-wrap gap-2">
           {[
             ['users', 'Usuarios'],
+            ['drivers', 'Choferes'],
+            ['customers', 'Clientes'],
             ['stats', 'Estadísticas'],
             ['cleanup', 'Limpieza'],
             ['lines', 'Líneas WhatsApp']
@@ -642,6 +848,222 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
           </div>
         )}
 
+        {tab === 'drivers' && (
+          <div className="p-6 grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6">
+            <form onSubmit={handleCreateDriver} className="border border-gray-200 rounded-lg p-4 space-y-3 h-fit">
+              <h3 className="font-semibold text-gray-800">Agregar chofer</h3>
+              <input
+                value={newDriver.name}
+                onChange={e => setNewDriver({ ...newDriver, name: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+                placeholder="Nombre del chofer"
+              />
+              <input
+                value={newDriver.phoneNumber}
+                onChange={e => setNewDriver({ ...newDriver, phoneNumber: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+                placeholder="Celular WhatsApp 593..."
+              />
+              <input
+                value={newDriver.vehicleLabel}
+                onChange={e => setNewDriver({ ...newDriver, vehicleLabel: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+                placeholder="Unidad / placa"
+              />
+              <select
+                value={newDriver.availabilityStatus}
+                onChange={e => setNewDriver({ ...newDriver, availabilityStatus: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+              >
+                <option value="available">Disponible</option>
+                <option value="busy">Ocupado</option>
+                <option value="offline">Fuera de turno</option>
+              </select>
+              <button
+                disabled={saving === 'driver' || !newDriver.phoneNumber.trim()}
+                className="w-full rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:bg-gray-300"
+              >
+                {saving === 'driver' ? 'Guardando...' : 'Guardar chofer'}
+              </button>
+            </form>
+
+            <div className="space-y-3">
+              {drivers.length === 0 ? (
+                <div className="rounded-lg border border-gray-200 p-6 text-sm text-gray-400">No hay choferes registrados.</div>
+              ) : drivers.map(driver => {
+                const draft = driverDrafts[driver.id] || driver;
+                return (
+                  <div key={driver.id} className="rounded-lg border border-gray-200 bg-white p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-[1fr_170px_150px] gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <input
+                          value={draft.name || ''}
+                          onChange={e => setDriverDrafts(current => ({
+                            ...current,
+                            [driver.id]: { ...draft, name: e.target.value }
+                          }))}
+                          className="border rounded-lg px-3 py-2 text-sm"
+                          placeholder="Nombre"
+                        />
+                        <input
+                          value={draft.phone_number || ''}
+                          onChange={e => setDriverDrafts(current => ({
+                            ...current,
+                            [driver.id]: { ...draft, phone_number: e.target.value }
+                          }))}
+                          className="border rounded-lg px-3 py-2 text-sm"
+                          placeholder="Celular"
+                        />
+                        <input
+                          value={draft.vehicle_label || ''}
+                          onChange={e => setDriverDrafts(current => ({
+                            ...current,
+                            [driver.id]: { ...draft, vehicle_label: e.target.value }
+                          }))}
+                          className="border rounded-lg px-3 py-2 text-sm"
+                          placeholder="Unidad"
+                        />
+                      </div>
+                      <select
+                        value={draft.availability_status || 'available'}
+                        onChange={e => setDriverDrafts(current => ({
+                          ...current,
+                          [driver.id]: { ...draft, availability_status: e.target.value }
+                        }))}
+                        className="border rounded-lg px-3 py-2 text-sm bg-white"
+                      >
+                        <option value="available">Disponible</option>
+                        <option value="busy">Ocupado</option>
+                        <option value="offline">Fuera de turno</option>
+                      </select>
+                      <div className="flex gap-2 md:justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateDriver(driver)}
+                          disabled={saving === `driver-${driver.id}`}
+                          className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                        >
+                          Guardar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDriver(driver)}
+                          disabled={saving === `delete-driver-${driver.id}`}
+                          className="rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-400">
+                      Estado actual: {availabilityLabels[driver.availability_status] || 'Sin estado'}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {tab === 'customers' && (
+          <div className="p-6 grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6">
+            <form onSubmit={handleCreateCustomer} className="border border-gray-200 rounded-lg p-4 space-y-3 h-fit">
+              <h3 className="font-semibold text-gray-800">Agregar cliente</h3>
+              <input
+                value={newCustomer.name}
+                onChange={e => setNewCustomer({ ...newCustomer, name: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+                placeholder="Nombre del cliente"
+              />
+              <input
+                value={newCustomer.phoneNumber}
+                onChange={e => setNewCustomer({ ...newCustomer, phoneNumber: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+                placeholder="Celular WhatsApp 593..."
+              />
+              <textarea
+                value={newCustomer.note}
+                onChange={e => setNewCustomer({ ...newCustomer, note: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm min-h-24"
+                placeholder="Nota inicial opcional"
+              />
+              <button
+                disabled={saving === 'customer' || !newCustomer.phoneNumber.trim()}
+                className="w-full rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:bg-gray-300"
+              >
+                {saving === 'customer' ? 'Guardando...' : 'Guardar cliente'}
+              </button>
+            </form>
+
+            <div className="space-y-3">
+              {customers.length === 0 ? (
+                <div className="rounded-lg border border-gray-200 p-6 text-sm text-gray-400">No hay clientes registrados.</div>
+              ) : customers.map(customer => {
+                const draft = customerDrafts[customer.id] || customer;
+                return (
+                  <div key={customer.id} className="rounded-lg border border-gray-200 bg-white p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-[1fr_150px] gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <input
+                          value={draft.contact_name || ''}
+                          onChange={e => setCustomerDrafts(current => ({
+                            ...current,
+                            [customer.id]: { ...draft, contact_name: e.target.value }
+                          }))}
+                          className="border rounded-lg px-3 py-2 text-sm"
+                          placeholder="Nombre"
+                        />
+                        <input
+                          value={draft.phone_number || ''}
+                          onChange={e => setCustomerDrafts(current => ({
+                            ...current,
+                            [customer.id]: { ...draft, phone_number: e.target.value }
+                          }))}
+                          className="border rounded-lg px-3 py-2 text-sm"
+                          placeholder="Celular"
+                        />
+                        <select
+                          value={draft.status || 'active'}
+                          onChange={e => setCustomerDrafts(current => ({
+                            ...current,
+                            [customer.id]: { ...draft, status: e.target.value }
+                          }))}
+                          className="border rounded-lg px-3 py-2 text-sm bg-white"
+                        >
+                          <option value="active">Activo</option>
+                          <option value="pending">Pendiente</option>
+                          <option value="closed">Archivado</option>
+                        </select>
+                      </div>
+                      <div className="flex gap-2 md:justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateCustomer(customer)}
+                          disabled={saving === `customer-${customer.id}`}
+                          className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                        >
+                          Guardar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCustomer(customer)}
+                          disabled={saving === `delete-customer-${customer.id}`}
+                          className="rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          Borrar
+                        </button>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-400">
+                      Línea: {customer.whatsapp_label || customer.line_key || 'Sin línea'} · Carrera: {customer.ride_status || 'sin estado'}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {tab === 'stats' && (
           <div className="p-6 space-y-6">
             {!summary ? (
@@ -793,22 +1215,76 @@ const AdminPanel = ({ agent, onClose, onLinesChanged, fullPage = false, onLogout
               </button>
             </form>
 
-            <div className="border border-gray-200 rounded-lg divide-y">
+            <div className="space-y-3">
               {lines.length === 0 ? (
-                <div className="p-6 text-sm text-gray-400">No hay líneas configuradas.</div>
-              ) : lines.map(line => (
-                <div key={line.id} className="p-4 flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-medium text-gray-800">{line.label}</p>
-                    <p className="text-xs text-gray-500">
-                      +{line.display_phone_number || 'sin número visible'} · ID {line.phone_number_id}
-                    </p>
+                <div className="rounded-lg border border-gray-200 p-6 text-sm text-gray-400">No hay líneas configuradas.</div>
+              ) : lines.map(line => {
+                const draft = lineDrafts[line.id] || line;
+                return (
+                  <div key={line.id} className="rounded-lg border border-gray-200 bg-white p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-[1fr_150px] gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <input
+                          value={draft.label || ''}
+                          onChange={e => setLineDrafts(current => ({
+                            ...current,
+                            [line.id]: { ...draft, label: e.target.value }
+                          }))}
+                          className="border rounded-lg px-3 py-2 text-sm"
+                          placeholder="Nombre de línea"
+                        />
+                        <input
+                          value={draft.display_phone_number || ''}
+                          onChange={e => setLineDrafts(current => ({
+                            ...current,
+                            [line.id]: { ...draft, display_phone_number: e.target.value }
+                          }))}
+                          className="border rounded-lg px-3 py-2 text-sm"
+                          placeholder="Celular visible"
+                        />
+                        <input
+                          value={draft.phone_number_id || ''}
+                          onChange={e => setLineDrafts(current => ({
+                            ...current,
+                            [line.id]: { ...draft, phone_number_id: e.target.value }
+                          }))}
+                          className="border rounded-lg px-3 py-2 text-sm"
+                          placeholder="Phone Number ID"
+                        />
+                      </div>
+                      <div className="flex gap-2 md:justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateLine(line)}
+                          disabled={saving === `line-${line.id}`}
+                          className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                        >
+                          Guardar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteLine(line)}
+                          disabled={saving === `delete-line-${line.id}`}
+                          className="rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          Desactivar
+                        </button>
+                      </div>
+                    </div>
+                    <label className="mt-3 flex w-fit items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(draft.is_default)}
+                        onChange={e => setLineDrafts(current => ({
+                          ...current,
+                          [line.id]: { ...draft, is_default: e.target.checked }
+                        }))}
+                      />
+                      Línea principal
+                    </label>
                   </div>
-                  <span className={`rounded-full px-2 py-1 text-xs ${line.is_default ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                    {line.is_default ? 'Principal' : 'Activa'}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
