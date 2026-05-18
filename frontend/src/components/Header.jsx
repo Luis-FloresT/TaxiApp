@@ -5,6 +5,7 @@ const Header = ({
   onDrivers,
   onReports,
   onMaintenance,
+  onAdmin,
   whatsappNumbers = [],
   selectedWhatsappNumberId = 'all',
   onWhatsappNumberChange
@@ -64,6 +65,15 @@ const Header = ({
             className="flex items-center gap-2 bg-green-700 hover:bg-green-800 px-3 py-1.5 rounded-lg text-sm transition-colors"
           >
             📊 Reportes
+          </button>
+        )}
+
+        {onAdmin && (
+          <button
+            onClick={onAdmin}
+            className="flex items-center gap-2 bg-green-700 hover:bg-green-800 px-3 py-1.5 rounded-lg text-sm transition-colors"
+          >
+            ⚙️ Admin
           </button>
         )}
 

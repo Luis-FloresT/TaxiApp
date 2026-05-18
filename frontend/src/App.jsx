@@ -9,6 +9,7 @@ import LegalPage from './components/LegalPage';
 import DriversPanel from './components/DriversPanel';
 import ReportsPanel from './components/ReportsPanel';
 import MaintenancePanel from './components/MaintenancePanel';
+import AdminPanel from './components/AdminPanel';
 import { getWhatsAppNumbers } from './services/api';
 
 const lineStorageKey = (username) => `selectedWhatsappNumberId:${username || 'default'}`;
@@ -37,6 +38,7 @@ function App() {
   const [showDrivers, setShowDrivers] = useState(false);
   const [showReports, setShowReports] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [whatsappNumbers, setWhatsappNumbers] = useState([]);
   const [selectedWhatsappNumberId, setSelectedWhatsappNumberId] = useState(() => {
     const savedAgent = readSavedAgent();
@@ -123,6 +125,7 @@ function App() {
         onDrivers={() => setShowDrivers(true)}
         onReports={agent.role === 'admin' ? () => setShowReports(true) : null}
         onMaintenance={agent.role === 'admin' ? () => setShowMaintenance(true) : null}
+        onAdmin={agent.role === 'admin' ? () => setShowAdmin(true) : null}
         whatsappNumbers={whatsappNumbers}
         selectedWhatsappNumberId={selectedWhatsappNumberId}
         onWhatsappNumberChange={handleWhatsappNumberChange}
@@ -172,6 +175,16 @@ function App() {
         <MaintenancePanel
           onClose={() => setShowMaintenance(false)}
           onBulkDeleted={handleBulkChatsDeleted}
+        />
+      )}
+      {showAdmin && (
+        <AdminPanel
+          agent={agent}
+          onClose={() => setShowAdmin(false)}
+          onLinesChanged={(lines) => {
+            setWhatsappNumbers(lines);
+            window.dispatchEvent(new Event('chats:refresh'));
+          }}
         />
       )}
     </div>

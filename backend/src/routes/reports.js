@@ -8,7 +8,15 @@ router.get('/summary', async (req, res) => {
   }
 
   try {
-    const [todayResult, statusResult, driverResult, responseResult] = await Promise.all([
+    const [
+      todayResult,
+      statusResult,
+      driverResult,
+      responseResult,
+      lineResult,
+      totalsResult,
+      agentResult
+    ] = await Promise.all([
       pool.query(
         `SELECT COUNT(*) FILTER (WHERE DATE(created_at) = CURRENT_DATE)::int as new_chats_today,
                 COUNT(*) FILTER (WHERE DATE(driver_dispatched_at) = CURRENT_DATE)::int as dispatched_today,
@@ -47,12 +55,38 @@ router.get('/summary', async (req, res) => {
            ORDER BY timestamp ASC LIMIT 1
          ) first_agent ON true
          WHERE first_agent.timestamp >= first_client.timestamp`
+      ),
+      pool.query(
+        `SELECT COALESCE(wn.label, c.line_key, 'Sin línea') AS line,
+                COUNT(*) FILTER (WHERE c.status <> 'closed')::int AS open_chats,
+                COUNT(*) FILTER (WHERE DATE(c.created_at) = CURRENT_DATE)::int AS new_today,
+                COUNT(*) FILTER (WHERE DATE(c.driver_dispatched_at) = CURRENT_DATE)::int AS dispatched_today
+         FROM chats c
+         LEFT JOIN whatsapp_numbers wn ON wn.id = c.whatsapp_number_id
+         GROUP BY COALESCE(wn.label, c.line_key, 'Sin línea')
+         ORDER BY open_chats DESC, line ASC`
+      ),
+      pool.query(
+        `SELECT COUNT(*) FILTER (WHERE contact_type = 'customer')::int AS total_customers,
+                COUNT(*) FILTER (WHERE contact_type = 'driver')::int AS total_driver_chats,
+                COUNT(*) FILTER (WHERE status <> 'closed')::int AS open_chats,
+                COUNT(*) FILTER (WHERE status = 'closed')::int AS archived_chats
+         FROM chats`
+      ),
+      pool.query(
+        `SELECT COUNT(*) FILTER (WHERE active = true)::int AS active_users,
+                COUNT(*) FILTER (WHERE active = true AND role = 'admin')::int AS admins,
+                COUNT(*) FILTER (WHERE active = true AND role = 'operator')::int AS operators
+         FROM agents`
       )
     ]);
 
     res.json({
       today: todayResult.rows[0],
+      totals: totalsResult.rows[0],
+      agents: agentResult.rows[0],
       by_status: statusResult.rows,
+      by_line: lineResult.rows,
       top_drivers_7d: driverResult.rows,
       response: responseResult.rows[0]
     });

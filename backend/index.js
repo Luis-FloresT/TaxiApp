@@ -121,6 +121,7 @@ if (enableSimulator) {
 // Rutas protegidas (requieren token)
 app.use('/chats', authMiddleware, require('./src/routes/chats'));
 app.use('/drivers', authMiddleware, require('./src/routes/drivers'));
+app.use('/agents', authMiddleware, require('./src/routes/agents'));
 app.use('/whatsapp-numbers', authMiddleware, require('./src/routes/whatsappNumbers'));
 app.use('/quick-replies', authMiddleware, require('./src/routes/quickReplies'));
 app.use('/reports', authMiddleware, require('./src/routes/reports'));

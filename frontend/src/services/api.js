@@ -41,6 +41,10 @@ export const getChats = (params = {}) => API.get('/chats', { params });
 export const createCustomerContacts = (data) => API.post('/chats/customers', data);
 export const getWhatsAppNumbers = () => API.get('/whatsapp-numbers');
 export const createWhatsAppNumber = (data) => API.post('/whatsapp-numbers', data);
+export const getAgents = () => API.get('/agents');
+export const createAgent = (data) => API.post('/agents', data);
+export const updateAgent = (id, data) => API.patch(`/agents/${id}`, data);
+export const resetAgentPassword = (id, password) => API.put(`/agents/${id}/password`, { password });
 export const getMessages = (chatId, params = {}) => API.get(`/chats/${chatId}/messages`, { params });
 export const getChatHistory = (chatId) => API.get(`/chats/${chatId}/history`);
 export const updateRideStatus = (chatId, status) =>
